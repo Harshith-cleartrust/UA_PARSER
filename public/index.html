@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UA & device detection (HVMS dataset)</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-copy">
+        <span class="header-kicker">UA Intelligence</span>
+        <h1>User-Agent &amp; device profile</h1>
+      </div>
+      <div class="header-pills">
+        <span class="header-pill">Fast local parse</span>
+        <span class="header-pill">Background lookup</span>
+        <span class="header-pill">Dataset-aware results</span>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="hero-card panel">
+        <div class="hero-toolbar">
+          <div class="hero-label">
+            <span class="hero-eyebrow">Input</span>
+            <h2 class="hero-title">User-Agent</h2>
+          </div>
+          <span class="hero-badge">Paste and detect</span>
+        </div>
+        <p class="hero-support">Paste a User-Agent, optionally fill Client hints, then <strong>Detect</strong>. Tap <strong>Use this device</strong> only when you want this browser’s hints copied into the fields (it replaces them).</p>
+        <p id="httpsBanner" class="https-banner" hidden></p>
+        <label class="field ua-field">
+          <textarea id="ua" rows="5" placeholder="Paste User-Agent…" class="ua-textarea"></textarea>
+        </label>
+
+        <details class="hints" open>
+          <summary>Client hints (manual + “Use this device” auto)</summary>
+          <p class="hints-note">
+            <strong>Use this device</strong> clears these fields and fills them from <strong>this</strong> browser (HTTP + <code>navigator.userAgentData</code>). <strong>Detect</strong> sends what you see here and <strong>does not refresh</strong> these fields afterward — your manual values stay. Paste e.g. <code>"SM-A5760"</code> to test another device’s model on your desktop.
+          </p>
+          <div class="hints-grid" autocomplete="off">
+            <label><span>Sec-CH-UA-Model</span><input type="text" id="hintModel" name="x-hint-model" placeholder="e.g. &quot;SM-A5760&quot; or leave for auto" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" /></label>
+            <label><span>Sec-CH-UA-Mobile</span><input type="text" id="hintMobile" name="x-hint-mobile" placeholder="?0 or ?1" autocomplete="off" data-1p-ignore="true" /></label>
+            <label><span>Sec-CH-UA-Platform</span><input type="text" id="hintPlat" name="x-hint-plat" placeholder='e.g. "Android"' autocomplete="off" data-1p-ignore="true" /></label>
+            <label><span>Sec-CH-UA-Platform-Version</span><input type="text" id="hintPlatVer" name="x-hint-platver" placeholder='e.g. "16.0.0"' autocomplete="off" data-1p-ignore="true" /></label>
+          </div>
+          <p id="chStatus" class="ch-status" hidden></p>
+        </details>
+
+        <div class="actions">
+          <button type="button" id="useDevice" class="btn">Use this device</button>
+          <button type="button" id="run" class="btn primary">Detect</button>
+        </div>
+
+        <p id="err" class="err" hidden></p>
+      </section>
+
+      <div class="main-layout">
+        <section class="panel split-panel results-panel">
+          <header class="col-head">
+            <span class="hero-eyebrow">Diagnostics</span>
+            <h2 class="col-title">Properties</h2>
+            <p class="col-desc">Detected fields with values and provenance (<code>evidence</code>, <code>device_db</code>, <code>live_lookup</code>, …).</p>
+          </header>
+
+          <p id="resultNote" class="result-note" hidden></p>
+          <div class="table-wrap">
+            <div id="tableEmptyState" class="table-empty">
+              <div class="table-empty-icon">UA</div>
+              <h3>No results yet</h3>
+              <p>Run detection to see browser, platform, and confirmed hardware details here.</p>
+            </div>
+            <table id="tbl">
+              <thead>
+                <tr>
+                  <th>Property</th>
+                  <th>Value</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script type="module" src="/app.js?v=13"></script>
+  </body>
+</html>

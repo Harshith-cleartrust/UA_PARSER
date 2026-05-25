@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "description": "UA + optional Client Hints cases. Use optional `tags` to group (e.g. apple, proof, crawler). Run a subset: `node automation/run-tests.mjs --offline --tags=apple` or `TAGS=proof,crawler`.",
+  "cases": [
+    {
+      "id": "cache-hit-samsung-a5760",
+      "tags": ["android", "cache", "smoke"],
+      "description": "Model in model_parse_cache — hardware from cache, platform from UA/CH",
+      "userAgent": "Mozilla/5.0 (Linux; Android 16; SM-A5760) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+      "clientHints": {
+        "secChUaModel": "\"SM-A5760\"",
+        "secChUaMobile": "?1",
+        "secChUaPlatform": "\"Android\"",
+        "secChUaPlatformVersion": "\"16.0.0\""
+      },
+      "expect": {
+        "httpStatus": 200,
+        "debug": {
+          "modelKey": { "equals": "sma5760" },
+          "modelParseCacheHit": { "equals": true },
+          "modelSource": { "equals": "client_hint" }
+        },
+        "properties": {
+          "HardwareChipset": { "includes": "Exynos" },
+          "HardwareVendor": { "includes": "Samsung" },
+          "PlatformVersion": { "includes": "16" },
+          "IsCrawler": { "equals": "False" }
+        },
+        "gsmarena": {
+          "reason": { "equals": "model_parse_cache_only" }
+        }
+      }
+    },
+    {
+      "id": "cache-hit-chrome-version-change",
+      "tags": ["android", "cache"],
+      "description": "Same model, different Chrome version — still cache hit",
+      "userAgent": "Mozilla/5.0 (Linux; Android 16; SM-A5760) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+      "clientHints": {
+        "secChUaModel": "\"SM-A5760\"",
+        "secChUaPlatform": "\"Android\"",
+        "secChUaPlatformVersion": "\"16.0.0\""
+      },
+      "expect": {
+        "debug": {
+          "modelKey": { "equals": "sma5760" },
+          "modelParseCacheHit": { "equals": true }
+        },
+        "properties": {
+          "BrowserVersion": { "includes": "131" }
+        }
+      }
+    },
+    {
+      "id": "android-ua-only-no-ch",
+      "tags": ["android", "cache"],
+      "description": "Android model from UA segment only",
+      "userAgent": "Mozilla/5.0 (Linux; Android 15; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36",
+      "expect": {
+        "debug": {
+          "modelKey": { "equals": "smg998b" },
+          "modelParseCacheHit": { "equals": true },
+          "modelSource": { "equals": "user_agent" }
+        },
+        "properties": {
+          "HardwareModel": { "includes": "SM-G998B" },
+          "PlatformName": { "equals": "Android" },
+          "HardwareChipset": { "includes": "Exynos" }
+        }
+      }
+    },
+    {
+      "id": "chrome-reduced-ua-k-no-model",
+      "tags": ["android", "edge", "proof"],
+      "description": "Chrome reduced UA (model token K) — no model key without Client Hints",
+      "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36",
+      "expect": {
+        "debug": {
+          "modelKey": { "equals": "" },
+          "modelSource": { "equals": "none" },
+          "modelParseCacheHit": { "equals": false }
+        }
+      }
+    },
+    {
+      "id": "chrome-reduced-ch-model-k-ignored",
+      "tags": ["android", "edge", "proof"],
+      "description": "Client Hint model K (GREASE) is ignored",
+      "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36",
+      "clientHints": {
+        "secChUaModel": "\"K\""
+      },
+      "expect": {
+        "debug": {
+          "modelKey": { "equals": "" },
+          "modelSource": { "equals": "none" }
+        }
+      }
+    },
+    {
+      "id": "unknown-model-no-cache",
+      "tags": ["android", "edge"],
+      "description": "Synthetic model not in cache — no model cache merge",
+      "userAgent": "Mozilla/5.0 (Linux; Android 14; ZZ-UNKNOWN-999) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+      "clientHints": {
+        "secChUaModel": "\"ZZ-UNKNOWN-999\""
+      },
+      "expect": {
+        "debug": {
+          "modelParseCacheHit": { "equals": false }
+        },
+        "properties": {
+          "IsCrawler": { "equals": "False" }
+        }
+      }
+    },
+    {
+      "id": "proof-client-hint-model-overrides-ua-android",
+      "tags": ["proof", "android", "cache"],
+      "description": "UA device segment is SM-G998B but sec-ch-ua-model is SM-A5760 — model key must follow Client Hints",
+      "userAgent": "Mozilla/5.0 (Linux; Android 15; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+      "clientHints": {
+        "secChUaModel": "\"SM-A5760\"",
+        "secChUaMobile": "?1",
+        "secChUaPlatform": "\"Android\"",
+        "secChUaPlatformVersion": "\"15.0.0\""
+      },
+      "expect": {
+        "debug": {
+          "modelKey": { "equals": "sma5760" },
+          "modelSource": { "equals": "client_hint" },
+          "modelParseCacheHit": { "equals": true }
+        },
+        "properties": {
+          "HardwareModel": { "includes": "SM-A5760" },
+          "HardwareChipset": { "includes": "Exynos 1680" }
+        }
+      }
+    },
+    {
+      "id": "proof-no-crawler-rows-when-not-bot",
+      "tags": ["proof", "android"],
+      "description": "Normal mobile UA must not expose CrawlerName row (only when IsCrawler True)",
+      "userAgent": "Mozilla/5.0 (Linux; Android 16; SM-A5760) Chrome/120 Mobile",
+      "clientHints": { "secChUaModel": "\"SM-A5760\"" },
+      "expect": {
+        "properties": {
+          "IsCrawler": { "equals": "False" }
+        },
+        "propertyNamesNotContain": ["CrawlerName", "CrawlerProductTokens", "CrawlerUrl", "CrawlerUsage"]
+      }
+    },
+    {
+      "id": "crawler-googlebot",
+      "tags": ["crawler", "proof"],
+      "description": "Crawler UA — crawler detail rows when IsCrawler True",
+      "userAgent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+      "expect": {
+        "properties": {
+          "IsCrawler": { "equals": "True" },
+          "CrawlerName": { "includes": "Googlebot" }
+        },
+        "propertyNamesContain": ["CrawlerName", "CrawlerProductTokens", "CrawlerUrl", "CrawlerUsage"]
+      }
+    },
+    {
+      "id": "desktop-chrome-no-mobile",
+      "tags": ["desktop"],
+      "description": "Desktop Chrome — desktop browser type",
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "expect": {
+        "properties": {
+          "BrowserName": { "includes": "Chrome" },
+          "Browser Type": { "equals": "desktop browser" },
+          "IsCrawler": { "equals": "False" }
+        }
+      }
+    },
+    {
+      "id": "iphone-safari",
+      "tags": ["apple", "ios"],
+      "description": "iPhone Safari — iOS platform from UA",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+      "expect": {
+        "properties": {
+          "PlatformName": { "equals": "iOS" },
+          "Operating System": { "equals": "iOS" },
+          "BrowserName": { "includes": "Safari" },
+          "IsCrawler": { "equals": "False" }
+        }
+      }
+    },
+    {
+      "id": "ipad-safari",
+      "tags": ["apple", "ios", "tablet"],
+      "description": "iPad Safari — tablet class",
+      "userAgent": "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+      "expect": {
+        "properties": {
+          "PlatformName": { "equals": "iOS" },
+          "DeviceType": { "equals": "Tablet" },
+          "IsCrawler": { "equals": "False" }
+        }
+      }
+    },
+    {
+      "id": "iphone-chrome-crios",
+      "tags": ["apple", "ios"],
+      "description": "iPhone Chrome (CriOS) — Blink-style engine label",
+      "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0.6723.90 Mobile/15E148 Safari/604.1",
+      "expect": {
+        "properties": {
+          "PlatformName": { "equals": "iOS" },
+          "BrowserName": { "includes": "Chrome Mobile" },
+          "BrowserVersion": { "includes": "130" },
+          "Rendering Engine": { "includes": "Blink" },
+          "IsCrawler": { "equals": "False" }
+        }
+      }
+    },
+    {
+      "id": "macos-safari-desktop",
+      "tags": ["apple", "macos", "desktop"],
+      "description": "macOS Safari desktop",
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+      "expect": {
+        "properties": {
+          "PlatformName": { "equals": "macOS" },
+          "BrowserName": { "includes": "Safari" },
+          "Browser Type": { "equals": "desktop browser" },
+          "IsCrawler": { "equals": "False" }
+        }
+      }
+    },
+    {
+      "id": "no-properties-removed-smoke",
+      "tags": ["smoke", "android", "cache"],
+      "description": "Response must include core property rows",
+      "userAgent": "Mozilla/5.0 (Linux; Android 16; SM-A5760) Chrome/120 Mobile",
+      "clientHints": { "secChUaModel": "\"SM-A5760\"" },
+      "expect": {
+        "propertyNamesContain": [
+          "BrowserName",
+          "HardwareChipset",
+          "PlatformName",
+          "IsCrawler"
+        ]
+      }
+    }
+  ]
+}
