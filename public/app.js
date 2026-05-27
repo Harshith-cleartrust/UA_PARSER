@@ -1,4 +1,6 @@
 const uaEl = document.getElementById("ua");
+const copyUaBtn = document.getElementById("copyUa");
+const clearUaBtn = document.getElementById("clearUa");
 const hintModel = document.getElementById("hintModel");
 const hintMobile = document.getElementById("hintMobile");
 const hintPlat = document.getElementById("hintPlat");
@@ -59,6 +61,39 @@ document.getElementById("run").addEventListener("click", run);
 document.getElementById("useDevice").addEventListener("click", () => {
   void useThisDevice();
 });
+copyUaBtn?.addEventListener("click", () => {
+  void copyUserAgent();
+});
+clearUaBtn?.addEventListener("click", clearUserAgent);
+
+function clearUserAgent() {
+  uaEl.value = "";
+  errEl.hidden = true;
+  errEl.textContent = "";
+  uaEl.focus();
+}
+
+async function copyUserAgent() {
+  const value = uaEl.value || "";
+  if (!value.trim()) return;
+
+  try {
+    await navigator.clipboard.writeText(value);
+    showCopyState();
+  } catch {
+    uaEl.select();
+    document.execCommand("copy");
+    showCopyState();
+  }
+}
+
+function showCopyState() {
+  if (!copyUaBtn) return;
+  copyUaBtn.classList.add("copied");
+  window.setTimeout(() => {
+    copyUaBtn.classList.remove("copied");
+  }, 1200);
+}
 
 function clearClientHintFields() {
   for (const el of [hintModel, hintMobile, hintPlat, hintPlatVer]) {

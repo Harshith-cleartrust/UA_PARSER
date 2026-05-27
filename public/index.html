@@ -31,6 +31,20 @@
         <p id="httpsBanner" class="https-banner" hidden></p>
         <label class="field ua-field">
           <textarea id="ua" rows="5" placeholder="Paste User-Agent…" class="ua-textarea"></textarea>
+          <div class="ua-tools">
+            <button type="button" id="copyUa" class="ua-tool-btn copy-ua-btn" aria-label="Copy User-Agent" title="Copy User-Agent">
+              <svg class="ua-tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M8 8.5A2.5 2.5 0 0 1 10.5 6h7A2.5 2.5 0 0 1 20 8.5v7a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 8 15.5v-7Z" />
+                <path d="M4 12.5A2.5 2.5 0 0 0 6.5 15H7v-2h-.5a.5.5 0 0 1-.5-.5v-7a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 .5.5V6h2v-.5A2.5 2.5 0 0 0 13.5 3h-7A2.5 2.5 0 0 0 4 5.5v7Z" />
+              </svg>
+            </button>
+            <button type="button" id="clearUa" class="ua-tool-btn clear-ua-btn" aria-label="Clear User-Agent" title="Clear User-Agent">
+              <svg class="ua-tool-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M9 3h6l1 2h4v2H4V5h4l1-2Z" />
+                <path d="M6 9h12l-.9 10.2A2 2 0 0 1 15.1 21H8.9a2 2 0 0 1-2-1.8L6 9Zm4 2v7h2v-7h-2Zm4 0v7h2v-7h-2Z" />
+              </svg>
+            </button>
+          </div>
         </label>
 
         <details class="hints" open>
@@ -81,6 +95,6 @@
       </div>
     </main>
 
-    <script type="module" src="/app.js?v=14"></script>
+    <script type="module" src="/app.js?v=18"></script>
   </body>
 </html>
