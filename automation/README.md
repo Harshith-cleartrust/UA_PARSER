@@ -32,7 +32,7 @@ If no case matches the filter, the report still writes with `casesRun: 0`.
 |-----|----------------|
 | **apple** | iPhone Safari, iPad Safari, iPhone Chrome (CriOS), macOS Safari |
 | **ios** | iPhone / iPad UA cases |
-| **proof** | Explicit behavior checks (Client Hints override UA model; no crawler rows unless bot; Googlebot includes crawler fields) |
+| **proof** | Explicit behavior checks (concrete UA model wins, Client Hints fill reduced/generic UAs, no crawler rows unless bot, Googlebot includes crawler fields) |
 | **crawler** | Bot UAs |
 | **android** | Android + cache / edge cases |
 | **cache** | Models present in `model_parse_cache.json` |
@@ -48,7 +48,7 @@ Edit `cases.json`. Each entry in `cases`:
 | `userAgent` | yes | Full UA string |
 | `clientHints` | no | Object passed as JSON body `clientHints` |
 | `tags` | no | e.g. `["apple","proof"]` — filter with `--tags=apple` |
-| `expect` | no | Assertions (see below) |
+| `expect` | no | Assertions — `httpStatus`, `debug`, `properties`, `meta`, `gsmarena`, `propertyNamesContain` / `propertyNamesNotContain` (see below) |
 | `captureFullResponse` | no | If `true`, full `/api/parse` JSON is stored in the report (large) |
 
 ### `expect` shape (all optional)
@@ -61,8 +61,13 @@ Edit `cases.json`. Each entry in `cases`:
     "modelParseCacheHit": { "equals": true }
   },
   "properties": {
-    "HardwareChipset": { "includes": "Exynos" },
+    "SoC": { "includes": "Exynos" },
+    "CPU": { "includes": "Octa-core" },
+    "GPU": { "includes": "Xclipse" },
     "IsCrawler": { "equals": "False" }
+  },
+  "meta": {
+    "parserVersion": { "regex": "^0\\.3\\.\\d+$" }
   },
   "gsmarena": {
     "reason": { "equals": "model_parse_cache_only" }
@@ -76,6 +81,8 @@ Matchers per field:
 - `{ "includes": "<substring>" }` — property value must include substring (case-sensitive)
 - `{ "regex": "<pattern>" }` — value must match (JS `RegExp`)
 - `{ "exists": true }` — property row must exist and not be `N/A` / empty
+
+`propertyNamesContain` / `propertyNamesNotContain` assert presence or absence of **property** row names (e.g. reject legacy `HardwareChipset` after rename to `SoC`).
 
 ## Output (one UA = one line)
 

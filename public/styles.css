@@ -179,16 +179,6 @@ code {
   white-space: nowrap;
 }
 
-.hero-support {
-  margin: 0 0 0.95rem;
-  max-width: 50rem;
-  color: var(--muted);
-  font-size: 0.92rem;
-  line-height: 1.55;
-  position: relative;
-  z-index: 1;
-}
-
 .ua-field {
   display: block;
   margin: 0;
@@ -268,13 +258,6 @@ input:focus {
   color: var(--text);
   background: rgba(255, 180, 80, 0.12);
   border: 1px solid rgba(255, 180, 80, 0.35);
-}
-
-.hints-note {
-  margin: 0 0 0.75rem;
-  font-size: 0.8rem;
-  color: var(--muted);
-  line-height: 1.45;
 }
 
 .hints-grid input[data-source="http"] {
@@ -591,11 +574,6 @@ td:first-child {
   font-weight: 600;
   white-space: nowrap;
   color: var(--text);
-}
-
-td:nth-child(3) {
-  color: var(--muted);
-  font-size: 0.8rem;
 }
 
 tbody tr:hover td {

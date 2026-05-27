@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>UA & device detection (HVMS dataset)</title>
+    <title>User-Agent Parser</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="header">
       <div class="header-copy">
         <span class="header-kicker">UA Intelligence</span>
-        <h1>User-Agent &amp; device profile</h1>
+        <h1>User-Agent Parser</h1>
       </div>
       <div class="header-pills">
         <span class="header-pill">Fast local parse</span>
@@ -28,7 +28,6 @@
           </div>
           <span class="hero-badge">Paste and detect</span>
         </div>
-        <p class="hero-support">Paste a User-Agent, optionally fill Client hints, then <strong>Detect</strong>. Tap <strong>Use this device</strong> only when you want this browser’s hints copied into the fields (it replaces them).</p>
         <p id="httpsBanner" class="https-banner" hidden></p>
         <label class="field ua-field">
           <textarea id="ua" rows="5" placeholder="Paste User-Agent…" class="ua-textarea"></textarea>
@@ -36,9 +35,6 @@
 
         <details class="hints" open>
           <summary>Client hints (manual + “Use this device” auto)</summary>
-          <p class="hints-note">
-            <strong>Use this device</strong> clears these fields and fills them from <strong>this</strong> browser (HTTP + <code>navigator.userAgentData</code>). <strong>Detect</strong> sends what you see here and <strong>does not refresh</strong> these fields afterward — your manual values stay. Paste e.g. <code>"SM-A5760"</code> to test another device’s model on your desktop.
-          </p>
           <div class="hints-grid" autocomplete="off">
             <label><span>Sec-CH-UA-Model</span><input type="text" id="hintModel" name="x-hint-model" placeholder="e.g. &quot;SM-A5760&quot; or leave for auto" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" /></label>
             <label><span>Sec-CH-UA-Mobile</span><input type="text" id="hintMobile" name="x-hint-mobile" placeholder="?0 or ?1" autocomplete="off" data-1p-ignore="true" /></label>
@@ -61,7 +57,7 @@
           <header class="col-head">
             <span class="hero-eyebrow">Diagnostics</span>
             <h2 class="col-title">Properties</h2>
-            <p class="col-desc">Detected fields with values and provenance (<code>evidence</code>, <code>device_db</code>, <code>live_lookup</code>, …).</p>
+            <p class="col-desc">Detected fields and values.</p>
           </header>
 
           <p id="resultNote" class="result-note" hidden></p>
@@ -76,7 +72,6 @@
                 <tr>
                   <th>Property</th>
                   <th>Value</th>
-                  <th>Source</th>
                 </tr>
               </thead>
               <tbody></tbody>
@@ -86,6 +81,6 @@
       </div>
     </main>
 
-    <script type="module" src="/app.js?v=13"></script>
+    <script type="module" src="/app.js?v=14"></script>
   </body>
 </html>

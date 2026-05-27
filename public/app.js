@@ -19,7 +19,7 @@ const PENDING_HARDWARE_PROPERTIES = new Set([
   "HardwareNameVersion",
   "HardwareVendor",
   "OEM",
-  "HardwareChipset",
+  "SoC",
   "CPU",
   "GPU",
   "ScreenInchesDiagonal",
@@ -435,8 +435,7 @@ function renderProperties(properties, data, lookupJob) {
         (data?.gsmarena?.reason === "supplemental_specs" &&
           PENDING_DIAGNOSTIC_GSMA_PROPERTIES.has(row.property)));
     const value = pending ? "…" : row.value ?? "N/A";
-    const source = pending ? "pending" : row.source ?? "";
-    tr.innerHTML = `<td>${escapeHtml(row.property)}</td><td>${escapeHtml(String(value))}</td><td>${escapeHtml(String(source))}</td>`;
+    tr.innerHTML = `<td>${escapeHtml(row.property)}</td><td>${escapeHtml(String(value))}</td>`;
     tblBody.appendChild(tr);
   }
 }

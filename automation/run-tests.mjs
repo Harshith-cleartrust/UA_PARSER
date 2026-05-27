@@ -140,6 +140,14 @@ function runExpectations(caseId, body, expect) {
     }
   }
 
+  if (expect.meta && typeof expect.meta === "object") {
+    for (const [key, rule] of Object.entries(expect.meta)) {
+      const actual = body.meta?.[key];
+      const { ok, detail } = matchValue(actual, rule);
+      if (!ok) failures.push({ path: `meta.${key}`, message: detail, actual, expected: rule });
+    }
+  }
+
   if (Array.isArray(expect.propertyNamesContain)) {
     const names = new Set((body.properties || []).map((p) => p.property));
     for (const n of expect.propertyNamesContain) {

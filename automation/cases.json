@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "description": "UA + optional Client Hints cases. Use optional `tags` to group (e.g. apple, proof, crawler). Run a subset: `node automation/run-tests.mjs --offline --tags=apple` or `TAGS=proof,crawler`.",
+  "version": 2,
+  "description": "UA + optional Client Hints cases. Property names match API output: SoC, CPU, GPU (not HardwareChipset/HardwareCpu/HardwareGpu). Use `tags` to filter. Run: `node automation/run-tests.mjs --offline --tags=apple` or `TAGS=proof,crawler`.",
   "cases": [
     {
       "id": "cache-hit-samsung-a5760",
@@ -18,13 +18,18 @@
         "debug": {
           "modelKey": { "equals": "sma5760" },
           "modelParseCacheHit": { "equals": true },
-          "modelSource": { "equals": "client_hint" }
+          "modelSource": { "equals": "user_agent" }
         },
         "properties": {
-          "HardwareChipset": { "includes": "Exynos" },
+          "SoC": { "includes": "Exynos" },
+          "CPU": { "includes": "Octa-core" },
+          "GPU": { "includes": "Xclipse" },
           "HardwareVendor": { "includes": "Samsung" },
           "PlatformVersion": { "includes": "16" },
           "IsCrawler": { "equals": "False" }
+        },
+        "meta": {
+          "parserVersion": { "regex": "^0\\.3\\.\\d+$" }
         },
         "gsmarena": {
           "reason": { "equals": "model_parse_cache_only" }
@@ -47,7 +52,10 @@
           "modelParseCacheHit": { "equals": true }
         },
         "properties": {
-          "BrowserVersion": { "includes": "131" }
+          "BrowserVersion": { "includes": "131" },
+          "SoC": { "includes": "Exynos 1680" },
+          "CPU": { "includes": "Cortex" },
+          "GPU": { "includes": "Xclipse" }
         }
       }
     },
@@ -65,7 +73,9 @@
         "properties": {
           "HardwareModel": { "includes": "SM-G998B" },
           "PlatformName": { "equals": "Android" },
-          "HardwareChipset": { "includes": "Exynos" }
+          "SoC": { "includes": "Exynos" },
+          "CPU": { "includes": "Octa-core" },
+          "GPU": { "includes": "Mali" }
         }
       }
     },
@@ -79,6 +89,11 @@
           "modelKey": { "equals": "" },
           "modelSource": { "equals": "none" },
           "modelParseCacheHit": { "equals": false }
+        },
+        "properties": {
+          "SoC": { "equals": "N/A" },
+          "CPU": { "equals": "N/A" },
+          "GPU": { "equals": "N/A" }
         }
       }
     },
@@ -94,6 +109,35 @@
         "debug": {
           "modelKey": { "equals": "" },
           "modelSource": { "equals": "none" }
+        },
+        "properties": {
+          "SoC": { "equals": "N/A" },
+          "CPU": { "equals": "N/A" },
+          "GPU": { "equals": "N/A" }
+        }
+      }
+    },
+    {
+      "id": "chrome-reduced-ch-real-model-used",
+      "tags": ["android", "edge", "proof", "cache"],
+      "description": "Chrome reduced UA (generic K) uses Sec-CH-UA-Model because the UA has no concrete device model",
+      "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36",
+      "clientHints": {
+        "secChUaModel": "\"SM-A5760\"",
+        "secChUaPlatform": "\"Android\"",
+        "secChUaPlatformVersion": "\"16.0.0\""
+      },
+      "expect": {
+        "debug": {
+          "modelKey": { "equals": "sma5760" },
+          "modelSource": { "equals": "client_hint" },
+          "modelParseCacheHit": { "equals": true }
+        },
+        "properties": {
+          "HardwareModel": { "includes": "SM-A5760" },
+          "SoC": { "includes": "Exynos 1680" },
+          "CPU": { "includes": "Octa-core" },
+          "GPU": { "includes": "Xclipse" }
         }
       }
     },
@@ -107,17 +151,21 @@
       },
       "expect": {
         "debug": {
-          "modelParseCacheHit": { "equals": false }
+          "modelParseCacheHit": { "equals": false },
+          "modelKey": { "equals": "zzunknown999" }
         },
         "properties": {
-          "IsCrawler": { "equals": "False" }
+          "IsCrawler": { "equals": "False" },
+          "SoC": { "equals": "N/A" },
+          "CPU": { "equals": "N/A" },
+          "GPU": { "equals": "N/A" }
         }
       }
     },
     {
-      "id": "proof-client-hint-model-overrides-ua-android",
+      "id": "proof-client-hint-model-does-not-override-concrete-ua-android",
       "tags": ["proof", "android", "cache"],
-      "description": "UA device segment is SM-G998B but sec-ch-ua-model is SM-A5760 — model key must follow Client Hints",
+      "description": "UA device segment is SM-G998B but sec-ch-ua-model is SM-A5760 — concrete UA model wins",
       "userAgent": "Mozilla/5.0 (Linux; Android 15; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
       "clientHints": {
         "secChUaModel": "\"SM-A5760\"",
@@ -127,13 +175,34 @@
       },
       "expect": {
         "debug": {
-          "modelKey": { "equals": "sma5760" },
-          "modelSource": { "equals": "client_hint" },
+          "modelKey": { "equals": "smg998b" },
+          "modelSource": { "equals": "user_agent" },
           "modelParseCacheHit": { "equals": true }
         },
         "properties": {
-          "HardwareModel": { "includes": "SM-A5760" },
-          "HardwareChipset": { "includes": "Exynos 1680" }
+          "HardwareModel": { "includes": "SM-G998B" },
+          "SoC": { "includes": "Exynos" },
+          "CPU": { "includes": "Octa-core" },
+          "GPU": { "includes": "Mali" }
+        }
+      }
+    },
+    {
+      "id": "proof-spoof-iphone-android-samsung",
+      "tags": ["proof", "android", "edge"],
+      "description": "Contradictory UA (iPhone token + Android + SM-) must not resolve Samsung hardware from model_parse_cache",
+      "userAgent": "Mozilla/5.0 (iPhone; Android 15; SM-S921B) AppleWebKit/605.1.15 Mobile Safari/604.1",
+      "expect": {
+        "debug": {
+          "modelKey": { "equals": null },
+          "modelSource": { "equals": "none" },
+          "modelParseCacheHit": { "equals": false }
+        },
+        "properties": {
+          "BrowserName": { "equals": "Unknown" },
+          "BrowserVendor": { "equals": "N/A" },
+          "HardwareModel": { "equals": "N/A" },
+          "SoC": { "equals": "N/A" }
         }
       }
     },
@@ -147,7 +216,15 @@
         "properties": {
           "IsCrawler": { "equals": "False" }
         },
-        "propertyNamesNotContain": ["CrawlerName", "CrawlerProductTokens", "CrawlerUrl", "CrawlerUsage"]
+        "propertyNamesNotContain": [
+          "CrawlerName",
+          "CrawlerProductTokens",
+          "CrawlerUrl",
+          "CrawlerUsage",
+          "HardwareChipset",
+          "HardwareCpu",
+          "HardwareGpu"
+        ]
       }
     },
     {
@@ -158,7 +235,10 @@
       "expect": {
         "properties": {
           "IsCrawler": { "equals": "True" },
-          "CrawlerName": { "includes": "Googlebot" }
+          "CrawlerName": { "includes": "Googlebot" },
+          "CrawlerProductTokens": { "equals": "N/A" },
+          "CrawlerUrl": { "equals": "N/A" },
+          "CrawlerUsage": { "equals": "N/A" }
         },
         "propertyNamesContain": ["CrawlerName", "CrawlerProductTokens", "CrawlerUrl", "CrawlerUsage"]
       }
@@ -172,7 +252,10 @@
         "properties": {
           "BrowserName": { "includes": "Chrome" },
           "Browser Type": { "equals": "desktop browser" },
-          "IsCrawler": { "equals": "False" }
+          "IsCrawler": { "equals": "False" },
+          "SoC": { "equals": "N/A" },
+          "CPU": { "equals": "N/A" },
+          "GPU": { "equals": "N/A" }
         }
       }
     },
@@ -186,7 +269,10 @@
           "PlatformName": { "equals": "iOS" },
           "Operating System": { "equals": "iOS" },
           "BrowserName": { "includes": "Safari" },
-          "IsCrawler": { "equals": "False" }
+          "IsCrawler": { "equals": "False" },
+          "SoC": { "equals": "N/A" },
+          "CPU": { "equals": "N/A" },
+          "GPU": { "equals": "N/A" }
         }
       }
     },
@@ -199,7 +285,10 @@
         "properties": {
           "PlatformName": { "equals": "iOS" },
           "DeviceType": { "equals": "Tablet" },
-          "IsCrawler": { "equals": "False" }
+          "IsCrawler": { "equals": "False" },
+          "SoC": { "equals": "N/A" },
+          "CPU": { "equals": "N/A" },
+          "GPU": { "equals": "N/A" }
         }
       }
     },
@@ -214,7 +303,10 @@
           "BrowserName": { "includes": "Chrome Mobile" },
           "BrowserVersion": { "includes": "130" },
           "Rendering Engine": { "includes": "Blink" },
-          "IsCrawler": { "equals": "False" }
+          "IsCrawler": { "equals": "False" },
+          "SoC": { "equals": "N/A" },
+          "CPU": { "equals": "N/A" },
+          "GPU": { "equals": "N/A" }
         }
       }
     },
@@ -228,7 +320,10 @@
           "PlatformName": { "equals": "macOS" },
           "BrowserName": { "includes": "Safari" },
           "Browser Type": { "equals": "desktop browser" },
-          "IsCrawler": { "equals": "False" }
+          "IsCrawler": { "equals": "False" },
+          "SoC": { "equals": "N/A" },
+          "CPU": { "equals": "N/A" },
+          "GPU": { "equals": "N/A" }
         }
       }
     },
@@ -239,12 +334,18 @@
       "userAgent": "Mozilla/5.0 (Linux; Android 16; SM-A5760) Chrome/120 Mobile",
       "clientHints": { "secChUaModel": "\"SM-A5760\"" },
       "expect": {
+        "meta": {
+          "parserVersion": { "regex": "^0\\.3\\.\\d+$" }
+        },
         "propertyNamesContain": [
           "BrowserName",
-          "HardwareChipset",
+          "SoC",
+          "CPU",
+          "GPU",
           "PlatformName",
           "IsCrawler"
-        ]
+        ],
+        "propertyNamesNotContain": ["HardwareChipset", "HardwareCpu", "HardwareGpu"]
       }
     }
   ]
