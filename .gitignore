@@ -3,5 +3,4 @@ node_modules/
 .env.local
 data/ua_parse_cache.json
 dataset_files/ua_parse_cache.json
-automation/output/
 .dev/

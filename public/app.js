@@ -1,11 +1,12 @@
 const uaEl = document.getElementById("ua");
 const copyUaBtn = document.getElementById("copyUa");
 const clearUaBtn = document.getElementById("clearUa");
+const aiAnalyzeBtn = document.getElementById("aiAnalyze");
 const hintModel = document.getElementById("hintModel");
 const hintMobile = document.getElementById("hintMobile");
 const hintPlat = document.getElementById("hintPlat");
 const hintPlatVer = document.getElementById("hintPlatVer");
-const tblBody = document.querySelector("#tbl tbody");
+const propertySections = document.getElementById("propertySections");
 const errEl = document.getElementById("err");
 const chStatus = document.getElementById("chStatus");
 const httpsBanner = document.getElementById("httpsBanner");
@@ -14,6 +15,7 @@ const tableEmptyState = document.getElementById("tableEmptyState");
 let activeRunToken = 0;
 let currentViewData = null;
 let currentViewRoundTripMs = null;
+let loadingMessageTimer = null;
 const PENDING_HARDWARE_PROPERTIES = new Set([
   "HardwareFamily",
   "HardwareModel",
@@ -31,6 +33,112 @@ const PENDING_HARDWARE_PROPERTIES = new Set([
 ]);
 
 const PENDING_DIAGNOSTIC_GSMA_PROPERTIES = new Set(["Device Model", "Manufacturer", "Approx Device Age"]);
+const PROPERTY_SECTIONS = [
+  {
+    title: "Browser",
+    fields: [
+      ["BrowserName", "Browser Name"],
+      ["BrowserVendor", "Browser Vendor"],
+      ["BrowserVersion", "Browser Version"],
+      ["Browser Type", "Browser Type"],
+      ["Rendering Engine", "Rendering Engine"],
+      ["Mobile Browser", "Mobile Browser"],
+      ["Android WebView", "Android WebView"],
+      ["In-App Browser", "In-App Browser"],
+    ],
+  },
+  {
+    title: "Hardware",
+    fields: [
+      ["HardwareFamily", "Hardware Family"],
+      ["HardwareModel", "Hardware Model"],
+      ["HardwareName", "Hardware Name"],
+      ["HardwareNameVersion", "Hardware Name Version"],
+      ["HardwareVendor", "Hardware Vendor"],
+      ["Manufacturer", "Manufacturer"],
+      ["Device Model", "Device Model"],
+      ["DeviceType", "Device Type"],
+      ["Approx Device Age", "Approx Device Age"],
+    ],
+  },
+  {
+    title: "Display",
+    fields: [
+      ["ScreenInchesDiagonal", "Screen Size"],
+      ["ScreenPixelsWidth", "Screen Width"],
+      ["ScreenPixelsHeight", "Screen Height"],
+    ],
+  },
+  {
+    title: "Chipset & Performance",
+    fields: [
+      ["SoC", "SoC"],
+      ["CPU", "CPU"],
+      ["GPU", "GPU"],
+      ["CPU Architecture", "CPU Architecture"],
+    ],
+  },
+  {
+    title: "Platform / Operating System",
+    fields: [
+      ["PlatformName", "Platform Name"],
+      ["PlatformVendor", "Platform Vendor"],
+      ["PlatformVersion", "Platform Version"],
+      ["Operating System", "Operating System"],
+      ["OS Version", "OS Version"],
+    ],
+  },
+  {
+    title: "Network & Connectivity",
+    fields: [["SupportedBearers", "Supported Bearers"]],
+  },
+  {
+    title: "Detection & Classification",
+    fields: [
+      ["IsCrawler", "Is Crawler"],
+      ["IsWebApp", "Is Web App"],
+      ["Automation / Bots", "Automation Bots"],
+    ],
+  },
+];
+const HUMANIZED_VALUE_PROPERTIES = new Set([
+  "HardwareFamily",
+  "HardwareName",
+  "HardwareNameVersion",
+  "HardwareVendor",
+  "Manufacturer",
+  "Device Model",
+  "DeviceType",
+  "BrowserName",
+  "BrowserVendor",
+  "PlatformName",
+  "PlatformVendor",
+  "Operating System",
+]);
+const LOADING_MESSAGES = [
+  "🧩 Untangling your browser identity...",
+  "👀 Looking for suspicious combinations...",
+  "📱 Tap your device if it’s actually real.",
+  "🧠 Teaching AI to trust your headers...",
+  "🔍 Finding out who your browser truly is...",
+  "⚠️ Your browser may be lying to us...",
+  "🎲 Rolling dice on whether this is genuine Chrome...",
+  "🛡️ Human or headless? Let’s see...",
+  "📡 Sending your UA to the interrogation room...",
+  "🧪 Testing for browser shapeshifting...",
+  "🕶️ Detecting fake mustaches on headless Chrome...",
+  "📖 Reading your browser’s backstory...",
+  "🎯 Can you fool the parser? Probably not.",
+  "🚨 Suspicious Safari activity detected...",
+  "🧬 Analyzing browser DNA...",
+  "🤝 Be honest… are you spoofing?",
+  "🎮 Browser identity mini-game starting...",
+  "🧠 AI is judging your User-Agent choices...",
+  "🔐 Verifying you’re not a smart fridge...",
+  "📞 Your headers are under investigation...",
+  "🛠️ Repairing broken browser identities...",
+  "😅 Trying not to crash on malformed UAs...",
+];
 
 function stripInvisible(s) {
   return String(s).replace(/[\u200B-\u200D\uFEFF]/g, "");
@@ -65,11 +173,16 @@ copyUaBtn?.addEventListener("click", () => {
   void copyUserAgent();
 });
 clearUaBtn?.addEventListener("click", clearUserAgent);
+aiAnalyzeBtn?.addEventListener("click", () => {
+  void aiAnalyze();
+});
+setAiAnalyzeEnabled(false);
 
 function clearUserAgent() {
   uaEl.value = "";
   errEl.hidden = true;
   errEl.textContent = "";
+  setAiAnalyzeEnabled(false);
   uaEl.focus();
 }
 
@@ -93,6 +206,25 @@ function showCopyState() {
   window.setTimeout(() => {
     copyUaBtn.classList.remove("copied");
   }, 1200);
+}
+
+function startLoadingMessages(prefix = "Working") {
+  stopLoadingMessages();
+  let idx = Math.floor(Math.random() * LOADING_MESSAGES.length);
+  const render = () => {
+    resultNote.hidden = false;
+    resultNote.innerHTML = `<div class="loading-note"><strong>${escapeHtml(prefix)}:</strong> ${escapeHtml(LOADING_MESSAGES[idx])}</div>`;
+    idx = (idx + 1) % LOADING_MESSAGES.length;
+  };
+  render();
+  loadingMessageTimer = window.setInterval(render, 1800);
+}
+
+function stopLoadingMessages() {
+  if (loadingMessageTimer) {
+    window.clearInterval(loadingMessageTimer);
+    loadingMessageTimer = null;
+  }
 }
 
 function clearClientHintFields() {
@@ -206,7 +338,7 @@ function updateChStatus(data) {
   const modelSource = data?.debug?.modelSource;
 
   lines.push(
-    "Detect uses only what you typed in the fields below, plus Sec-CH-UA-* headers the browser adds to this request. Use this device fills these fields from this browser (and clears them first).",
+    "Detect uses only what is typed in the Client hints fields below. Browser-added Sec-CH-UA-* headers are used only when you tap Use this device to copy them into the fields.",
   );
 
   if (data?.debug) {
@@ -214,9 +346,7 @@ function updateChStatus(data) {
     if (raw && typeof raw === "object" && Object.keys(raw).length > 0) {
       lines.push(`Server received clientHints in JSON body: ${JSON.stringify(raw)}`);
     } else {
-      lines.push(
-        "Server received no keys inside JSON clientHints (empty object). Only HTTP headers were used for hints. Expand “Client hints”, type the model again, hard-refresh the page, and restart the Node server if this persists.",
-      );
+      lines.push("No Client hints were sent in the JSON body, so Detect ignored browser HTTP Client Hint headers for this parse.");
     }
   }
 
@@ -224,9 +354,7 @@ function updateChStatus(data) {
     lines.push("Chrome hid the model in the UA (… K …). You need HTTPS + Sec-CH-UA-Model for your exact device id.");
   }
 
-  if (data?.debug?.secChUaModelFromHeader) {
-    lines.push("Model for lookup: Sec-CH-UA-Model HTTP header from this device.");
-  } else if (data?.debug?.secChUaModelFromJs) {
+  if (data?.debug?.secChUaModelFromJs) {
     lines.push("Model for lookup: from the JSON request body (typed in the form or filled by Use this device).");
   } else if (modelSource === "client_hint" && data?.debug?.modelRaw) {
     lines.push(`Model for lookup: Client Hints / body (${data.debug.modelRaw}).`);
@@ -249,7 +377,7 @@ function updateChStatus(data) {
     if (u.secChUaPlatform) parts.push(`platform=${u.secChUaPlatform}`);
     if (u.secChUaPlatformVersion) parts.push(`platformVersion=${u.secChUaPlatformVersion}`);
     if (parts.length) {
-      lines.push(`Merged hints used for this parse: ${parts.join(", ")}. The form above is not overwritten after Detect.`);
+      lines.push(`Client hints used for this parse: ${parts.join(", ")}. The form above is not overwritten after Detect.`);
     }
   }
 
@@ -281,6 +409,7 @@ async function run() {
 
   resetUi();
   updateHttpsBanner();
+  startLoadingMessages("Detect");
 
   try {
     const ua = uaEl.value || navigator.userAgent || "";
@@ -299,6 +428,7 @@ async function run() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (runToken !== activeRunToken) return;
+    stopLoadingMessages();
     const roundTripMs = Math.round(performance.now() - clientT0);
     updateChStatus(data);
     renderParseResult(data, { roundTripMs, lookupJob: data.lookupJob || null });
@@ -307,28 +437,215 @@ async function run() {
     }
   } catch (e) {
     if (runToken !== activeRunToken) return;
+    stopLoadingMessages();
     errEl.hidden = false;
     errEl.textContent = e.message || String(e);
     resultNote.hidden = true;
   }
 }
 
+async function aiAnalyze() {
+  if (!currentViewData || aiAnalyzeBtn?.disabled) return;
+  errEl.hidden = true;
+  errEl.textContent = "";
+  startLoadingMessages("AI Analyze");
+
+  try {
+    const ua = uaEl.value || navigator.userAgent || "";
+    if (!uaEl.value.trim()) uaEl.value = ua;
+
+    const res = await fetch("/api/ai-analyze", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userAgent: ua, clientHints: readClientHintsFromFields() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    stopLoadingMessages();
+    renderAiAnalyzeResult(data, res.ok);
+  } catch (e) {
+    stopLoadingMessages();
+    errEl.hidden = false;
+    errEl.textContent = e.message || String(e);
+    resultNote.hidden = true;
+  }
+}
+
+function renderAiAnalyzeResult(data, ok) {
+  const message =
+    data?.message ||
+    data?.analysis ||
+    (ok ? "AI analysis completed." : "AI Analyze is unavailable.");
+  let risk = normalizeRiskLevel(data?.riskLevel);
+  let score = normalizeRiskScore(data?.riskScore, risk);
+  const modelConflict = data?.localDetection?.debug?.modelSourceConflict;
+  if (modelConflict?.uaModel && modelConflict?.chModel) {
+    risk = "high";
+    score = Math.max(score ?? 0, 8);
+  }
+  const bodyText = patchAnalysisRiskPreamble(String(message), risk, score);
+  resultNote.hidden = false;
+  resultNote.innerHTML = `<div class="ai-analysis">${renderRiskHeader(risk, score)}${formatAiAnalysis(bodyText)}</div>`;
+}
+
+/** Keep the markdown risk line consistent with the gauge when we adjust score client-side. */
+function patchAnalysisRiskPreamble(text, risk, score) {
+  if (!risk || score == null) return String(text || "");
+  const s = String(text || "");
+  return s.replace(
+    /^\*\*Risk:\s*(?:HIGH|MEDIUM|LOW)\s*\(\d{1,2}\/10\)\*\*/im,
+    `**Risk: ${risk.toUpperCase()} (${score}/10)**`,
+  );
+}
+
+function normalizeRiskLevel(raw) {
+  const v = String(raw || "").toLowerCase();
+  if (v === "high" || v === "medium" || v === "low") return v;
+  return "";
+}
+
+function normalizeRiskScore(raw, risk) {
+  const n = Number(raw);
+  if (Number.isFinite(n)) return Math.max(1, Math.min(10, Math.round(n)));
+  if (risk === "high") return 9;
+  if (risk === "medium") return 5;
+  if (risk === "low") return 2;
+  return null;
+}
+
+function riskFromScore(score) {
+  if (score == null) return "";
+  if (score >= 7) return "high";
+  if (score >= 4) return "medium";
+  return "low";
+}
+
+function renderRiskHeader(risk, score) {
+  if (!risk) return "<h3>AI Analyze</h3>";
+  const scoreClass = riskFromScore(score) || risk;
+  const deg = score == null ? 0 : Math.round((score / 10) * 360);
+  return [
+    '<div class="risk-header">',
+    '<span class="risk-label">AI Analyze</span>',
+    '<div class="risk-summary">',
+    `<span class="risk-gauge ${scoreClass}" style="--risk-deg:${deg}deg"><span>${score ?? "?"}</span></span>`,
+    `<span class="risk-badge ${risk}">${risk.toUpperCase()} RISK</span>`,
+    "</div>",
+    "</div>",
+  ].join("");
+}
+
+function formatAiAnalysis(raw) {
+  const sectionNames = [
+    "Risk: HIGH",
+    "Risk: MEDIUM",
+    "Risk: LOW",
+    "Risk: HIGH (10/10)",
+    "Risk: HIGH (9/10)",
+    "Risk: HIGH (8/10)",
+    "Risk: HIGH (7/10)",
+    "Risk: MEDIUM (6/10)",
+    "Risk: MEDIUM (5/10)",
+    "Risk: MEDIUM (4/10)",
+    "Risk: LOW (3/10)",
+    "Risk: LOW (2/10)",
+    "Risk: LOW (1/10)",
+    "Summary",
+    "Reasons",
+    "Recommendation",
+    "Important signals",
+    "Conflicts / spoofing check",
+    "Confidence",
+    "Practical classification",
+  ];
+  const sectionRe = new RegExp(`\\s*\\*\\*(${sectionNames.map(escapeRegExp).join("|")})\\*\\*\\s*`, "gi");
+  let text = String(raw || "")
+    .trim()
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(sectionRe, "\n\n**$1**\n")
+    .replace(/\s+-\s+(?=\*\*)/g, "\n- ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const html = [];
+  let inList = false;
+  const closeList = () => {
+    if (inList) {
+      html.push("</ul>");
+      inList = false;
+    }
+  };
+
+  for (const line of lines) {
+    const heading = line.match(/^\*\*(.+?)\*\*$/);
+    if (heading) {
+      closeList();
+      html.push(`<h4>${escapeHtml(heading[1])}</h4>`);
+      continue;
+    }
+
+    if (line.startsWith("- ")) {
+      if (!inList) {
+        html.push("<ul>");
+        inList = true;
+      }
+      html.push(`<li>${formatInlineMarkdown(line.slice(2))}</li>`);
+      continue;
+    }
+
+    closeList();
+    html.push(`<p>${formatInlineMarkdown(line)}</p>`);
+  }
+  closeList();
+
+  return html.join("");
+}
+
+function formatInlineMarkdown(s) {
+  const code = [];
+  let escaped = escapeHtml(s).replace(/`([^`]+)`/g, (_m, inner) => {
+    const token = `@@CODE${code.length}@@`;
+    code.push(`<code>${inner}</code>`);
+    return token;
+  });
+  escaped = escaped.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  for (let i = 0; i < code.length; i++) {
+    escaped = escaped.replace(`@@CODE${i}@@`, code[i]);
+  }
+  return escaped;
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function resetUi() {
+  stopLoadingMessages();
   currentViewData = null;
   currentViewRoundTripMs = null;
+  setAiAnalyzeEnabled(false);
   errEl.hidden = true;
   errEl.textContent = "";
   resultNote.hidden = true;
   resultNote.textContent = "";
-  tblBody.replaceChildren();
+  propertySections.replaceChildren();
   tableEmptyState.hidden = false;
 }
 
 function renderParseResult(data, { roundTripMs = null, lookupJob = null } = {}) {
   currentViewData = data;
   if (roundTripMs != null) currentViewRoundTripMs = roundTripMs;
+  setAiAnalyzeEnabled(true);
   renderResultNote(data, lookupJob);
   renderProperties(data.properties || [], data, lookupJob);
+}
+
+function setAiAnalyzeEnabled(enabled) {
+  if (!aiAnalyzeBtn) return;
+  aiAnalyzeBtn.disabled = !enabled;
+  aiAnalyzeBtn.title = enabled ? "Analyze risk using AI" : "Run Detect first";
 }
 
 function renderResultNote(data, lookupJob) {
@@ -454,7 +771,7 @@ async function pollLookupJob(lookupJob, runToken) {
 }
 
 function renderProperties(properties, data, lookupJob) {
-  tblBody.replaceChildren();
+  propertySections.replaceChildren();
   if (!properties.length) {
     tableEmptyState.hidden = false;
     return;
@@ -462,17 +779,75 @@ function renderProperties(properties, data, lookupJob) {
   tableEmptyState.hidden = true;
 
   const pendingHw = isLookupPending(lookupJob);
-  for (const row of properties) {
-    const tr = document.createElement("tr");
-    const pending =
-      pendingHw &&
-      (PENDING_HARDWARE_PROPERTIES.has(row.property) ||
-        (data?.gsmarena?.reason === "supplemental_specs" &&
-          PENDING_DIAGNOSTIC_GSMA_PROPERTIES.has(row.property)));
-    const value = pending ? "…" : row.value ?? "N/A";
-    tr.innerHTML = `<td>${escapeHtml(row.property)}</td><td>${escapeHtml(String(value))}</td>`;
-    tblBody.appendChild(tr);
+  const byProperty = new Map(properties.map((row) => [row.property, row]));
+
+  for (const section of PROPERTY_SECTIONS) {
+    const seenValues = new Set();
+    const rows = [];
+    for (const [propertyName, label] of section.fields) {
+      const row = byProperty.get(propertyName);
+      if (!row) continue;
+      const pending =
+        pendingHw &&
+        (PENDING_HARDWARE_PROPERTIES.has(row.property) ||
+          (data?.gsmarena?.reason === "supplemental_specs" &&
+            PENDING_DIAGNOSTIC_GSMA_PROPERTIES.has(row.property)));
+      const rawValue = pending ? "…" : row.value ?? "N/A";
+      const value = formatPropertyValue(row.property, rawValue);
+      const duplicateKey = duplicateValueKey(value);
+      if (duplicateKey && seenValues.has(duplicateKey)) continue;
+      if (duplicateKey) seenValues.add(duplicateKey);
+      rows.push({ label, value });
+    }
+    if (rows.length === 0) continue;
+
+    const card = document.createElement("section");
+    card.className = "property-section";
+    card.innerHTML = [
+      `<h3>${escapeHtml(section.title)}</h3>`,
+      '<table class="property-table">',
+      "<thead><tr><th>Property</th><th>Value</th></tr></thead>",
+      `<tbody>${rows
+        .map((row) => `<tr><td>${escapeHtml(row.label)}</td><td>${escapeHtml(String(row.value))}</td></tr>`)
+        .join("")}</tbody>`,
+      "</table>",
+    ].join("");
+    propertySections.appendChild(card);
   }
+}
+
+function duplicateValueKey(value) {
+  const s = String(value || "").trim().toLowerCase();
+  if (!s || s === "n/a" || s === "none detected" || s === "unknown") return "";
+  return s;
+}
+
+function formatPropertyValue(property, value) {
+  const s = String(value ?? "N/A");
+  if (!HUMANIZED_VALUE_PROPERTIES.has(property) || s === "N/A" || s === "…") return s;
+  return s
+    .split(/(\s+|[-/()])/)
+    .map((part) => {
+      if (!/[a-z]/i.test(part)) return part;
+      const known = {
+        ios: "iOS",
+        macos: "macOS",
+        android: "Android",
+        chrome: "Chrome",
+        safari: "Safari",
+        vivo: "Vivo",
+        samsung: "Samsung",
+        google: "Google",
+        apple: "Apple",
+      };
+      if (known[part.toLowerCase()]) return known[part.toLowerCase()];
+      if (/^[A-Z0-9]{2,}$/.test(part)) return part;
+      return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+    })
+    .join("")
+    .replace(/\bGalaxy([A-Z])/g, "Galaxy $1")
+    .replace(/\bIphone\b/g, "iPhone")
+    .replace(/\bIpad\b/g, "iPad");
 }
 
 function escapeHtml(s) {

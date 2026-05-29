@@ -61,6 +61,7 @@
         <div class="actions">
           <button type="button" id="useDevice" class="btn">Use this device</button>
           <button type="button" id="run" class="btn primary">Detect</button>
+          <button type="button" id="aiAnalyze" class="btn ai-btn" disabled>AI Analyze</button>
         </div>
 
         <p id="err" class="err" hidden></p>
@@ -81,20 +82,12 @@
               <h3>No results yet</h3>
               <p>Run detection to see browser, platform, and confirmed hardware details here.</p>
             </div>
-            <table id="tbl">
-              <thead>
-                <tr>
-                  <th>Property</th>
-                  <th>Value</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+            <div id="propertySections" class="property-sections"></div>
           </div>
         </section>
       </div>
     </main>
 
-    <script type="module" src="/app.js?v=18"></script>
+    <script type="module" src="/app.js?v=27"></script>
   </body>
 </html>

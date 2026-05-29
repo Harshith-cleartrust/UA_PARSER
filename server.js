@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { loadDeviceIndex, defaultDatasetPath, resolveDevice, normalizeModelKey } from "./lib/deviceIndex.js";
 import { mergeExpandedModelKeysForLearning } from "./lib/gsmarenaModelCodes.js";
 import { buildDetectionResult, PARSER_API_VERSION } from "./lib/buildResult.js";
+import { detectModelSourceConflict } from "./lib/parseSignals.js";
 import { tryGsmarenaEnrich, applyGsmarenaToResult } from "./lib/gsmarenaEnrich.js";
 import { firecrawlConfigured } from "./lib/gsmarenaFetchTransport.js";
 import {
@@ -38,7 +39,6 @@ import {
 import {
   ACCEPT_CH_VALUE,
   clientHintsFromHttpHeaders,
-  mergeClientHintsFromRequest,
   pickNonEmptyClientHintsFromBody,
 } from "./lib/clientHintsFromRequest.js";
 
@@ -49,6 +49,11 @@ const DEV_KEY = path.join(__dirname, ".dev", "key.pem");
 const firstPort = Number(process.env.PORT) || 3000;
 const portLocked = Boolean(process.env.PORT);
 const portAttempts = portLocked ? 1 : 15;
+const AI_ANALYZE_BASE_URL = (process.env.AI_ANALYZE_BASE_URL || "https://api.konsole.one").replace(/\/$/, "");
+const AI_ANALYZE_ENDPOINT =
+  process.env.AI_ANALYZE_ENDPOINT?.trim() || `${AI_ANALYZE_BASE_URL}/v1/chat/completions`;
+const AI_ANALYZE_API_KEY = process.env.AI_ANALYZE_API_KEY?.trim() || process.env.KONSOLE_API_KEY?.trim() || "";
+const AI_ANALYZE_MODEL = process.env.AI_ANALYZE_MODEL?.trim() || "gpt-5.4";
 
 /** HVMS dataset; GSMArena learns append new rows here when `LEARN_DEVICE_DB` is on. Override with `DEVICE_DATASET`. */
 const datasetPath = process.env.DEVICE_DATASET || defaultDatasetPath();
@@ -389,6 +394,371 @@ app.get("/api/parse-jobs/:jobId", (req, res) => {
   });
 });
 
+/** AI Analyze omits platform-version hints (frozen UA vs real OS from CH confuses risk scoring). */
+function clientHintsWithoutPlatformVersionForAi(hints) {
+  const base = hints && typeof hints === "object" && !Array.isArray(hints) ? { ...hints } : {};
+  delete base.secChUaPlatformVersion;
+  delete base["Sec-CH-UA-Platform-Version"];
+  delete base["sec-ch-ua-platform-version"];
+  delete base.sec_ch_ua_platform_version;
+  return base;
+}
+
+/** Omit PlatformVersion from the JSON sent to the AI so it cannot quote a CH-derived OS level. */
+function localDetectionSnapshotForAiPrompt(local) {
+  if (!local || typeof local !== "object") return local;
+  const props = { ...(local.properties || {}) };
+  delete props.PlatformVersion;
+  return { ...local, properties: props };
+}
+
+/**
+ * Upstream models often hallucinate "UA Android 10 vs CH platform version 16" even when that
+ * header was stripped from the prompt. Drop those claims from the user-visible fields.
+ */
+function scrubChPlatformVersionClaimsFromAiRisk(parsed) {
+  const out = {
+    ...parsed,
+    reasons: Array.isArray(parsed.reasons) ? [...parsed.reasons] : [],
+  };
+  const chPlatVer = /sec[\s_-]*ch[\s_-]*ua[\s_-]*platform[\s_-]*version/i;
+  const platVerContra = /platform[\s_-]*version\s+contradiction/i;
+  const ua10vsCh16 =
+    /android\s*10[^\n]{0,220}(16\.0|android\s*16)|(?:16\.0|android\s*16)[^\n]{0,220}android\s*10/i;
+
+  const badReason = (r) =>
+    typeof r !== "string" || chPlatVer.test(r) || platVerContra.test(r) || ua10vsCh16.test(r);
+
+  out.reasons = out.reasons.filter((r) => !badReason(r));
+
+  if (typeof out.summary === "string" && (chPlatVer.test(out.summary) || platVerContra.test(out.summary) || ua10vsCh16.test(out.summary))) {
+    out.summary =
+      "Risk from device/browser identity and parser signals only; this analysis intentionally does not use Client Hints platform OS version.";
+  }
+  if (
+    typeof out.recommendation === "string" &&
+    (chPlatVer.test(out.recommendation) || platVerContra.test(out.recommendation) || ua10vsCh16.test(out.recommendation))
+  ) {
+    out.recommendation =
+      "Correlate model, crawler, and UA-structure signals; do not treat UA Android level vs Client Hints platform version as a risk signal here.";
+  }
+
+  out.analysis = buildRiskAnalysisMarkdown(out);
+  return out;
+}
+
+function buildRiskAnalysisMarkdown({ riskLevel, riskScore, summary, reasons, recommendation }) {
+  const reasonsList = Array.isArray(reasons) ? reasons : [];
+  return [
+    `**Risk: ${riskLevel.toUpperCase()} (${riskScore}/10)**`,
+    "",
+    `**Summary**`,
+    `- ${summary}`,
+    reasonsList.length ? `**Reasons**\n${reasonsList.map((r) => `- ${r}`).join("\n")}` : "",
+    recommendation ? `**Recommendation**\n- ${recommendation}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * When the upstream model returns a generic medium score, align the UI with
+ * deterministic parser signals (model UA vs Client Hints conflict, etc.).
+ */
+function isCleanLocalRiskContext(local) {
+  const p = local?.properties;
+  if (!p || typeof p !== "object") return false;
+  if (local?.debug?.modelSourceConflict) return false;
+  if (String(p.IsCrawler || "").toLowerCase() === "true") return false;
+  if (String(p.BrowserName || "") === "Unknown") return false;
+  if (String(p.PlatformName || "") === "Unknown") return false;
+  return true;
+}
+
+function mergeAiRiskWithLocalDetection(parsed, localDetection, opts = {}) {
+  const out = { ...parsed };
+  const notes = [];
+  const userAgent = String(opts.userAgent || "");
+  const clientHintsRaw =
+    opts.clientHintsRaw && typeof opts.clientHintsRaw === "object" ? opts.clientHintsRaw : {};
+  const repicked = pickNonEmptyClientHintsFromBody(clientHintsRaw);
+  const conflict =
+    (userAgent && detectModelSourceConflict({ userAgent, clientHints: repicked })) ||
+    localDetection?.debug?.modelSourceConflict;
+
+  if (conflict) {
+    const before = { level: out.riskLevel, score: out.riskScore };
+    out.riskLevel = "high";
+    out.riskScore = Math.max(out.riskScore, 8);
+    const line = `Parser: User-Agent model "${conflict.uaModel}" disagrees with Sec-CH-UA-Model "${conflict.chModel}" (spoofing / mixed signals).`;
+    out.reasons = [line, ...(out.reasons || [])].filter(Boolean).slice(0, 8);
+    out.summary = `Contradictory device identifiers: UA reports ${conflict.uaModel} but Client Hints report ${conflict.chModel}.`;
+    if (before.level !== out.riskLevel || before.score !== out.riskScore) {
+      notes.push("raised_to_match_parser_model_conflict");
+    }
+  } else if (
+    isCleanLocalRiskContext(localDetection) &&
+    out.riskLevel !== "high" &&
+    out.riskScore <= 5
+  ) {
+    const before = { level: out.riskLevel, score: out.riskScore };
+    out.riskScore = Math.min(3, out.riskScore);
+    out.riskLevel = "low";
+    const soft = "Local parser found no UA vs Client Hints model conflict and no crawler signals; baseline harm score lowered.";
+    out.reasons = [soft, ...(out.reasons || [])].filter(Boolean).slice(0, 8);
+    if (before.level !== out.riskLevel || before.score !== out.riskScore) {
+      notes.push("lowered_for_coherent_local_parse");
+    }
+  }
+
+  out.analysis = buildRiskAnalysisMarkdown(out);
+  return { parsed: out, riskAdjustNotes: notes };
+}
+
+function parseAiRiskAnalysis(raw) {
+  const fallback = {
+    riskLevel: "medium",
+    riskScore: 5,
+    summary: "AI returned an unstructured risk analysis.",
+    reasons: [],
+    recommendation: "Review the raw analysis manually.",
+    analysis: String(raw || ""),
+  };
+  if (!raw) return fallback;
+
+  const text = String(raw).trim();
+  const jsonText = text.match(/```json\s*([\s\S]*?)```/i)?.[1] || text.match(/\{[\s\S]*\}/)?.[0] || text;
+  try {
+    const data = JSON.parse(jsonText);
+    const risk = String(data.riskLevel || data.risk || "").toLowerCase();
+    const riskLevel = ["high", "medium", "low"].includes(risk) ? risk : fallback.riskLevel;
+    const scoreRaw = Number(data.riskScore ?? data.score ?? data.harmScore);
+    const riskScore = Number.isFinite(scoreRaw)
+      ? Math.max(1, Math.min(10, Math.round(scoreRaw)))
+      : riskLevel === "high"
+        ? 9
+        : riskLevel === "medium"
+          ? 5
+          : 2;
+    const reasons = Array.isArray(data.reasons)
+      ? data.reasons.map((r) => String(r)).filter(Boolean).slice(0, 6)
+      : [];
+    const summary = String(data.summary || fallback.summary);
+    const recommendation = String(data.recommendation || "");
+    return {
+      riskLevel,
+      riskScore,
+      summary,
+      reasons,
+      recommendation,
+      analysis: buildRiskAnalysisMarkdown({ riskLevel, riskScore, summary, reasons, recommendation }),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function propertyMap(result) {
+  const out = {};
+  for (const row of result?.properties || []) {
+    if (row?.property) out[row.property] = row.value;
+  }
+  return out;
+}
+
+async function buildLocalDetectionContext(userAgent, clientHints) {
+  const modelCacheOnly = modelParseCacheOnlyMode();
+  const result = buildDetectionResult(
+    { userAgent, clientHints },
+    deviceCatalog,
+    {
+      allowHardwareInferenceWithoutDataset: false,
+      skipDatasetHardware: modelCacheOnly,
+    },
+  );
+
+  if (modelCacheOnly) {
+    await resolveHardwareFromModelParseCache(result);
+  } else {
+    const modelKey = result.debug?.modelKey;
+    if (modelKey) {
+      const modelCacheHit = await readModelParseCacheEntry(modelKey);
+      applyModelParseCacheLayer(result, modelCacheHit);
+    }
+    applyHvmsDatasetHardwareFallback(result, deviceCatalog);
+  }
+
+  const props = propertyMap(result);
+  return {
+    meta: {
+      parserVersion: result.meta?.parserVersion,
+      modelParseCacheOnly: modelCacheOnly,
+      indexedModels: result.meta?.indexedModels,
+    },
+    debug: {
+      modelKey: result.debug?.modelKey ?? null,
+      modelRaw: result.debug?.modelRaw ?? null,
+      modelSource: result.debug?.modelSource ?? "none",
+      modelSourceConflict: result.debug?.modelSourceConflict ?? null,
+      modelParseCacheHit: result.debug?.modelParseCacheHit ?? false,
+      datasetMatch: result.debug?.datasetMatch ?? false,
+      uaAndroidModelReason: result.debug?.uaAndroidModelReason ?? null,
+      uaIosHardwareHint: result.debug?.uaIosHardwareHint ?? null,
+    },
+    properties: {
+      BrowserName: props.BrowserName,
+      BrowserVendor: props.BrowserVendor,
+      BrowserVersion: props.BrowserVersion,
+      PlatformName: props.PlatformName,
+      PlatformVersion: props.PlatformVersion,
+      DeviceType: props.DeviceType,
+      HardwareVendor: props.HardwareVendor,
+      HardwareFamily: props.HardwareFamily,
+      HardwareModel: props.HardwareModel,
+      HardwareName: props.HardwareName,
+      SoC: props.SoC,
+      CPU: props.CPU,
+      GPU: props.GPU,
+      IsCrawler: props.IsCrawler,
+      CrawlerName: props.CrawlerName,
+    },
+  };
+}
+
+/**
+ * POST /api/ai-analyze
+ * Separate API from `/api/parse`. This endpoint is reserved for AI commentary and
+ * never runs the normal parser/detect flow.
+ */
+app.post("/api/ai-analyze", async (req, res) => {
+  const userAgent = String(req.body?.userAgent ?? "");
+  const clientHints =
+    req.body?.clientHints && typeof req.body.clientHints === "object" ? req.body.clientHints : {};
+
+  if (!AI_ANALYZE_API_KEY) {
+    res.status(501).json({
+      ok: false,
+      error: "ai_analyze_not_configured",
+      message:
+        "AI Analyze is a separate API and is not configured on this server. Set AI_ANALYZE_API_KEY (or KONSOLE_API_KEY) to enable it.",
+      received: {
+        hasUserAgent: userAgent.trim().length > 0,
+        clientHintKeys: Object.keys(clientHints),
+      },
+    });
+    return;
+  }
+
+  try {
+    const clientHintsPicked = pickNonEmptyClientHintsFromBody(clientHints);
+    const clientHintsUsedForAi = { ...clientHintsPicked };
+    delete clientHintsUsedForAi.secChUaPlatformVersion;
+    const clientHintsForPrompt = clientHintsWithoutPlatformVersionForAi(clientHints);
+    const localDetection = await buildLocalDetectionContext(userAgent, clientHintsUsedForAi);
+    const localForPrompt = localDetectionSnapshotForAiPrompt(localDetection);
+    const prompt = [
+      "Risk-analyze this User-Agent and optional Client Hints using the local parser/dataset result as evidence.",
+      "Sec-CH-UA-Platform-Version is intentionally omitted for this analysis (do not infer risk from it).",
+      "Do not mention Sec-CH-UA-Platform-Version, Client Hints platform OS version, or any UA-vs-CH Android API contradiction — those signals are out of scope and were not supplied to the model.",
+      "Chromium often freezes Android 10 + model K in the legacy UA while the real device is newer; that alone is not spoofing.",
+      "Classify the UA risk as exactly one of: high, medium, low.",
+      "High risk = clear spoofing/contradictions (including UA model vs Sec-CH-UA-Model mismatch such as V2068A vs V2068B), impossible OS/browser/device mix, automation/crawler/tooling, or suspicious malformed UA.",
+      "Medium risk = local parser has weak confidence, stale/ambiguous WebView/OEM browser, missing model for reduced UA, or weak/conflicting but plausible signals.",
+      "Low risk = local parser/dataset result matches coherent browser/platform/device signals with no meaningful conflict.",
+      "Also assign riskScore as an integer from 1 to 10: 1 safest/lowest harm, 10 most harmful/highest risk.",
+      "Compare the raw UA/Client Hints against localDetection. If localDetection shows a contradiction reason or no hardware match where one is expected, factor that into risk.",
+      "Return ONLY valid JSON with this shape:",
+      "{\"riskLevel\":\"high|medium|low\",\"riskScore\":1-10,\"summary\":\"one short sentence\",\"reasons\":[\"reason 1\",\"reason 2\"],\"recommendation\":\"short practical action\"}",
+      "",
+      `User-Agent: ${userAgent || "(empty)"}`,
+      `Client Hints JSON from request body (platform version stripped for this AI call): ${JSON.stringify(clientHintsForPrompt)}`,
+      `Client Hints actually used for local detection in this AI call: ${JSON.stringify(clientHintsUsedForAi)}`,
+      `Local parser/dataset result JSON (PlatformVersion field omitted on purpose): ${JSON.stringify(localForPrompt)}`,
+    ].join("\n");
+
+    const upstream = await fetch(AI_ANALYZE_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-app-key": AI_ANALYZE_API_KEY,
+        "Authorization": `Bearer ${AI_ANALYZE_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: AI_ANALYZE_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You are a User-Agent risk analyst. Return only valid JSON.",
+              "The server merges your score with parser flags (e.g. UA vs Sec-CH-UA-Model mismatch).",
+              "Never mention Sec-CH-UA-Platform-Version, never claim risk from UA Android version disagreeing with Client Hints OS/platform version, and never invent a CH platform version the JSON did not include.",
+              "Frozen or reduced Android in the legacy User-Agent string is normal for Chromium and is not evidence of spoofing by itself.",
+              "Do not default every case to medium; stay within the JSON schema.",
+            ].join(" "),
+          },
+          { role: "user", content: prompt },
+        ],
+        stream: false,
+      }),
+    });
+    const text = await upstream.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+
+    if (!upstream.ok) {
+      res.status(upstream.status).json({
+        ok: false,
+        error: "ai_analyze_upstream_error",
+        status: upstream.status,
+        message: data?.error?.message || data?.message || text.slice(0, 1000) || "AI API request failed.",
+      });
+      return;
+    }
+
+    const analysis =
+      data?.choices?.[0]?.message?.content ||
+      data?.choices?.[0]?.text ||
+      data?.message ||
+      data?.analysis ||
+      "";
+    const riskRaw = parseAiRiskAnalysis(analysis);
+    const { parsed: risk, riskAdjustNotes } = mergeAiRiskWithLocalDetection(riskRaw, localDetection, {
+      userAgent,
+      clientHintsRaw: clientHintsForPrompt,
+    });
+    const riskOut = scrubChPlatformVersionClaimsFromAiRisk(risk);
+
+    res.json({
+      ok: true,
+      provider: "konsole",
+      model: AI_ANALYZE_MODEL,
+      localDetection,
+      riskLevel: riskOut.riskLevel,
+      riskScore: riskOut.riskScore,
+      summary: riskOut.summary,
+      reasons: riskOut.reasons,
+      recommendation: riskOut.recommendation,
+      analysis: riskOut.analysis || analysis || "AI API returned no analysis text.",
+      riskFromModel: {
+        riskLevel: riskRaw.riskLevel,
+        riskScore: riskRaw.riskScore,
+      },
+      riskParserAdjusted: riskAdjustNotes.length > 0,
+      riskAdjustNotes,
+    });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: "ai_analyze_upstream_failed",
+      message: String(err?.message || err),
+    });
+  }
+});
+
 /**
  * POST /api/parse
  * body: { userAgent, clientHints? }
@@ -403,7 +773,10 @@ app.post("/api/parse", async (req, res) => {
     const chFromBodyRaw =
       req.body?.clientHints && typeof req.body.clientHints === "object" ? req.body.clientHints : {};
     const chFromBodyPicked = pickNonEmptyClientHintsFromBody(chFromBodyRaw);
-    const clientHints = mergeClientHintsFromRequest(req);
+    // Detect only trusts Client Hints explicitly sent in JSON body (visible form
+    // fields). Browser-added HTTP Sec-CH-UA-* is only used by /api/ch-probe to
+    // fill the form when "Use this device" is clicked.
+    const clientHints = chFromBodyPicked;
     const modelCacheOnly = modelParseCacheOnlyMode();
 
     const result = buildDetectionResult(
@@ -420,7 +793,7 @@ app.post("/api/parse", async (req, res) => {
       result.debug.clientHintsFromJs = chFromBodyRaw;
       result.debug.clientHintsBodyPicked = chFromBodyPicked;
       result.debug.clientHintsUsed = clientHints;
-      result.debug.secChUaModelFromHeader = Boolean(chFromHttp.secChUaModel && !chFromBodyPicked.secChUaModel);
+      result.debug.secChUaModelFromHeader = false;
       /** Model hint originated from JSON body (manual paste or client-collected), not from Sec-CH-UA-Model header alone. */
       result.debug.secChUaModelFromJs = Boolean(chFromBodyPicked.secChUaModel);
     }

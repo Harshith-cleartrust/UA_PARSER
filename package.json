@@ -7,14 +7,12 @@
     "start": "MODEL_PARSE_CACHE=1 node server.js",
     "cert:dev": "mkdir -p .dev && openssl req -x509 -newkey rsa:2048 -keyout .dev/key.pem -out .dev/cert.pem -days 365 -nodes -subj /CN=localhost",
     "start:https": "npm run cert:dev && USE_HTTPS=1 MODEL_PARSE_CACHE=1 node server.js",
+    "start:ai": "MODEL_PARSE_CACHE=1 AI_ANALYZE_BASE_URL=https://api.konsole.one node server.js",
     "start:full": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node server.js",
     "start:gsmarena": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node server.js",
     "dev": "MODEL_PARSE_CACHE=1 node --watch server.js",
     "dev:full": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node --watch server.js",
-    "dev:gsmarena": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node --watch server.js",
-    "test:automation": "node automation/run-tests.mjs",
-    "test:automation:offline": "node automation/run-tests.mjs --offline",
-    "test:automation:apple": "node automation/run-tests.mjs --offline --tags=apple"
+    "dev:gsmarena": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node --watch server.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
