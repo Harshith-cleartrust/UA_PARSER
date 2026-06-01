@@ -419,7 +419,7 @@ async function run() {
     const hintsForApi = readClientHintsFromFields();
 
     const clientT0 = performance.now();
-    const res = await fetch("/api/parse", {
+    const res = await fetch("/api/parse?format=detailed", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },

@@ -1,6 +1,7 @@
 node_modules/
 .env
 .env.local
+data/
 data/ua_parse_cache.json
 dataset_files/ua_parse_cache.json
 .dev/

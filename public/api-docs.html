@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>API documentation — User-Agent Parser</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-copy">
+        <span class="header-kicker">Reference</span>
+        <h1>API documentation</h1>
+      </div>
+      <div class="header-actions">
+        <a href="/" class="header-docs-link">← Back to parser</a>
+      </div>
+    </header>
+
+    <main class="page api-docs-page">
+      <section class="panel api-docs-intro">
+        <p>
+          Base URL is your deployed origin (e.g. <code>https://your-host.example</code>). All JSON APIs use
+          <code>Content-Type: application/json</code> unless noted.
+        </p>
+        <p>
+          <strong>Client Hints in API calls:</strong> Only fields you send in the JSON <code>clientHints</code> object
+          are used for <code>/api/parse</code> and <code>/api/ai-analyze</code>. Browser HTTP
+          <code>Sec-CH-UA-*</code> headers are <em>not</em> merged automatically (use <code>/api/ch-probe</code> in
+          the UI to copy them into the form).
+        </p>
+      </section>
+
+      <section class="panel api-docs-intro">
+        <h2 class="api-h2">Audit log</h2>
+        <p>
+          When <code>AUDIT_LOG=1</code> (enabled in <code>npm start</code> / <code>npm run start:https</code>),
+          each <code>/api/parse</code> and <code>/api/ai-analyze</code> call appends one JSON line to a
+          <strong>date-based file</strong>: <code>data/audit/YYYY-MM-DD.jsonl</code> (gitignored). Check
+          <code>GET /api/health</code> → <code>auditLog</code> for today’s file path.
+        </p>
+        <pre class="api-code">{"at":"2026-05-29T...","type":"parse","endpoint":"/api/parse","ip":"10.0.0.1","ok":true,"modelKey":"sma266b","durationMs":12,"userAgent":{"mode":"truncate","length":180,"value":"Mozilla/5.0 ..."}}</pre>
+        <p class="api-note">
+          Env: <code>AUDIT_LOG_PATH</code>, <code>AUDIT_LOG_UA_MODE=truncate|full|hash</code>. Logs are not returned by the API — read the file on the server.
+        </p>
+      </section>
+
+      <section class="panel api-endpoint" id="health">
+        <div class="api-endpoint-head">
+          <span class="api-method get">GET</span>
+          <h2><code>/api/health</code></h2>
+        </div>
+        <p>Server status, parser version, dataset size, and cache flags.</p>
+        <h3>Response</h3>
+        <pre class="api-code">{
+  "ok": true,
+  "parserVersion": "0.3.56",
+  "indexedModels": 8253,
+  "deviceDbVersion": "...",
+  "gsmarenaAllowed": false,
+  "modelParseCache": { "enabled": true, "entryCount": 9650, ... }
+}</pre>
+      </section>
+
+      <section class="panel api-endpoint" id="ch-probe">
+        <div class="api-endpoint-head">
+          <span class="api-method get">GET</span>
+          <h2><code>/api/ch-probe</code></h2>
+        </div>
+        <p>
+          Echoes <code>Sec-CH-UA-*</code> headers the browser sent on this request (after
+          <code>Accept-CH</code>). Used by the UI “Use this device” flow; same-origin only.
+        </p>
+        <h3>Response</h3>
+        <pre class="api-code">{
+  "clientHintsFromHeaders": {
+    "secChUaModel": "\"SM-A266B\"",
+    "secChUaMobile": "?1",
+    "secChUaPlatform": "\"Android\""
+  }
+}</pre>
+      </section>
+
+      <section class="panel api-endpoint" id="parse">
+        <div class="api-endpoint-head">
+          <span class="api-method post">POST</span>
+          <h2><code>/api/parse</code></h2>
+        </div>
+        <p>Main detection endpoint. Returns browser, platform, and hardware properties in one response (from <code>model_parse_cache.json</code> when cache mode is on).</p>
+        <h3>Request body</h3>
+        <pre class="api-code">{
+  "userAgent": "Mozilla/5.0 (Linux; Android 12; SM-A266B) ...",
+  "clientHints": {
+    "secChUaModel": "\"SM-A266B\"",
+    "secChUaMobile": "?1",
+    "secChUaPlatform": "\"Android\"",
+    "secChUaPlatformVersion": "\"16.0.0\""
+  }
+}</pre>
+        <p class="api-note">
+          <code>clientHints</code> is optional. Keys: <code>secChUaModel</code>, <code>secChUaMobile</code>,
+          <code>secChUaPlatform</code>, <code>secChUaPlatformVersion</code> (aliases like
+          <code>Sec-CH-UA-Model</code> are normalized).
+        </p>
+        <h3>Response (default)</h3>
+        <p class="api-note">Only <code>meta</code> and <code>properties</code> — no <code>debug</code>, <code>gsmarena</code>, or other fields.</p>
+        <pre class="api-code">{
+  "meta": {
+    "parserVersion": "0.3.56",
+    "deviceSet": "SMARTPHONE_HARDWARE_FLAT",
+    "deviceDbVersion": "1.2",
+    "deviceDbLastUpdated": "2026-02-19",
+    "indexedModels": 9428,
+    "parseTimeMs": 4
+  },
+  "properties": {
+    "BrowserName": "Chrome Mobile",
+    "BrowserVendor": "Google",
+    "HardwareModel": "SM-A266B",
+    "PlatformName": "Android",
+    "Operating System": "Android",
+    "Android WebView": "No"
+  }
+}</pre>
+        <p class="api-note">
+          Internal/debug fields: <code>?format=detailed</code> (used by the web UI only).
+        </p>
+      </section>
+
+      <section class="panel api-endpoint" id="ai-analyze">
+        <div class="api-endpoint-head">
+          <span class="api-method post">POST</span>
+          <h2><code>/api/ai-analyze</code></h2>
+        </div>
+        <p>
+          Risk analysis via Konsole AI. Runs local parser first, then merges AI score with parser signals (e.g. UA vs
+          model Client Hint mismatch). Requires <code>AI_ANALYZE_API_KEY</code> on the server.
+        </p>
+        <h3>Request body</h3>
+        <pre class="api-code">{
+  "userAgent": "Mozilla/5.0 ...",
+  "clientHints": { "secChUaModel": "\"SM-A266B\"", "secChUaPlatform": "\"Android\"" }
+}</pre>
+        <p class="api-note">
+          <code>secChUaPlatformVersion</code> is stripped for AI analysis (not used for risk scoring).
+        </p>
+        <h3>Response (summary)</h3>
+        <pre class="api-code">{
+  "ok": true,
+  "riskLevel": "low",
+  "riskScore": 3,
+  "summary": "...",
+  "reasons": ["..."],
+  "recommendation": "...",
+  "localDetection": { "properties": { ... }, "debug": { ... } }
+}</pre>
+        <p class="api-note"><code>501</code> if AI is not configured on the server.</p>
+      </section>
+
+      <section class="panel api-docs-intro">
+        <h2 class="api-h2">Example: curl</h2>
+        <pre class="api-code">curl -s -X POST https://YOUR_HOST/api/parse \
+  -H "Content-Type: application/json" \
+  -d '{"userAgent":"Mozilla/5.0 (Linux; Android 12; SM-A266B) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"}'</pre>
+      </section>
+    </main>
+  </body>
+</html>

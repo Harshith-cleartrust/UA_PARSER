@@ -41,6 +41,14 @@ import {
   clientHintsFromHttpHeaders,
   pickNonEmptyClientHintsFromBody,
 } from "./lib/clientHintsFromRequest.js";
+import {
+  auditLogEnabled,
+  auditLogDir,
+  auditLogPath,
+  auditLogStatus,
+  auditParseRequest,
+  auditAiAnalyzeRequest,
+} from "./lib/auditLog.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USE_HTTPS = process.env.USE_HTTPS === "1";
@@ -104,6 +112,11 @@ try {
     console.error(
       `Model parse cache: ON — ${loaded.path} (${loaded.entryCount ?? "?"} entries, TTL ~${loaded.ttlDays}d). ` +
         `Hardware source: model_parse_cache.json only (no GSMArena/HVMS/UA cache on parse).`,
+    );
+  }
+  if (auditLogEnabled()) {
+    console.error(
+      `Audit log: ON — ${auditLogDir()}/YYYY-MM-DD.jsonl (today: ${path.basename(auditLogPath())})`,
     );
   }
 } catch (e) {
@@ -377,6 +390,7 @@ app.get("/api/health", (_req, res) => {
     cachedLiveSpecsInMemory: gsmarenaResultCache.size,
     uaParseCache: uaParseCacheStatus(),
     modelParseCache: modelParseCacheStatus(),
+    auditLog: auditLogStatus(),
   });
 });
 
@@ -566,6 +580,33 @@ function propertyMap(result) {
   return out;
 }
 
+/** Public API shape: only meta + flat properties (Postman / integrations). */
+function slimParseApiResponse(result) {
+  const meta = result?.meta || {};
+  return {
+    meta: {
+      parserVersion: meta.parserVersion,
+      deviceSet: meta.deviceSet,
+      deviceDbVersion: meta.deviceDbVersion,
+      deviceDbLastUpdated: meta.deviceDbLastUpdated,
+      indexedModels: meta.indexedModels,
+      parseTimeMs: meta.parseTimeMs,
+    },
+    properties: propertyMap(result),
+  };
+}
+
+/**
+ * Default: slim JSON (`meta` + flat `properties` only).
+ * `?format=detailed` — full internal payload (array properties, debug, gsmarena) for the web UI.
+ */
+function parseApiResponseBody(result, format) {
+  if (String(format || "").toLowerCase() === "detailed") {
+    return result;
+  }
+  return slimParseApiResponse(result);
+}
+
 async function buildLocalDetectionContext(userAgent, clientHints) {
   const modelCacheOnly = modelParseCacheOnlyMode();
   const result = buildDetectionResult(
@@ -631,11 +672,19 @@ async function buildLocalDetectionContext(userAgent, clientHints) {
  * never runs the normal parser/detect flow.
  */
 app.post("/api/ai-analyze", async (req, res) => {
+  const aiT0 = Date.now();
   const userAgent = String(req.body?.userAgent ?? "");
   const clientHints =
     req.body?.clientHints && typeof req.body.clientHints === "object" ? req.body.clientHints : {};
 
   if (!AI_ANALYZE_API_KEY) {
+    auditAiAnalyzeRequest(req, {
+      ok: false,
+      status: 501,
+      durationMs: Date.now() - aiT0,
+      error: "ai_analyze_not_configured",
+      clientHintsPicked: clientHints,
+    });
     res.status(501).json({
       ok: false,
       error: "ai_analyze_not_configured",
@@ -710,6 +759,14 @@ app.post("/api/ai-analyze", async (req, res) => {
     }
 
     if (!upstream.ok) {
+      auditAiAnalyzeRequest(req, {
+        ok: false,
+        status: upstream.status,
+        durationMs: Date.now() - aiT0,
+        error: "ai_analyze_upstream_error",
+        localDetection,
+        clientHintsPicked: clientHintsUsedForAi,
+      });
       res.status(upstream.status).json({
         ok: false,
         error: "ai_analyze_upstream_error",
@@ -732,6 +789,17 @@ app.post("/api/ai-analyze", async (req, res) => {
     });
     const riskOut = scrubChPlatformVersionClaimsFromAiRisk(risk);
 
+    auditAiAnalyzeRequest(req, {
+      ok: true,
+      status: 200,
+      durationMs: Date.now() - aiT0,
+      riskLevel: riskOut.riskLevel,
+      riskScore: riskOut.riskScore,
+      riskParserAdjusted: riskAdjustNotes.length > 0,
+      localDetection,
+      clientHintsPicked: clientHintsUsedForAi,
+    });
+
     res.json({
       ok: true,
       provider: "konsole",
@@ -751,6 +819,13 @@ app.post("/api/ai-analyze", async (req, res) => {
       riskAdjustNotes,
     });
   } catch (err) {
+    auditAiAnalyzeRequest(req, {
+      ok: false,
+      status: 502,
+      durationMs: Date.now() - aiT0,
+      error: String(err?.message || err),
+      clientHintsPicked: clientHints,
+    });
     res.status(502).json({
       ok: false,
       error: "ai_analyze_upstream_failed",
@@ -766,13 +841,14 @@ app.post("/api/ai-analyze", async (req, res) => {
  * a background job is queued and the client can poll `lookupJob.pollUrl` for the final enriched result.
  */
 app.post("/api/parse", async (req, res) => {
+  const parseT0 = Date.now();
+  let chFromBodyPicked = {};
   try {
-    const parseT0 = Date.now();
     const userAgent = req.body?.userAgent ?? "";
     const chFromHttp = clientHintsFromHttpHeaders(req.headers);
     const chFromBodyRaw =
       req.body?.clientHints && typeof req.body.clientHints === "object" ? req.body.clientHints : {};
-    const chFromBodyPicked = pickNonEmptyClientHintsFromBody(chFromBodyRaw);
+    chFromBodyPicked = pickNonEmptyClientHintsFromBody(chFromBodyRaw);
     // Detect only trusts Client Hints explicitly sent in JSON body (visible form
     // fields). Browser-added HTTP Sec-CH-UA-* is only used by /api/ch-probe to
     // fill the form when "Use this device" is clicked.
@@ -922,8 +998,23 @@ app.post("/api/parse", async (req, res) => {
 
     result.meta.parseTimeMs = Date.now() - parseT0;
 
-    res.json(result);
+    const format = req.query?.format ?? req.body?.format;
+    auditParseRequest(req, {
+      ok: true,
+      status: 200,
+      durationMs: Date.now() - parseT0,
+      result,
+      clientHintsPicked: chFromBodyPicked,
+    });
+    res.json(parseApiResponseBody(result, format));
   } catch (err) {
+    auditParseRequest(req, {
+      ok: false,
+      status: 500,
+      durationMs: Date.now() - parseT0,
+      error: String(err?.message || err),
+      clientHintsPicked: chFromBodyPicked,
+    });
     res.status(500).json({ error: String(err?.message || err) });
   }
 });
