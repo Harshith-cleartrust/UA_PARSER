@@ -5,3 +5,10 @@ data/
 data/ua_parse_cache.json
 dataset_files/ua_parse_cache.json
 .dev/
+
+# GSMArena crawler (see crawler/README.md)
+crawler/output.json
+crawler/progress.json
+crawler/logs/
+crawler/__pycache__/
+crawler/.venv/

@@ -173700,6 +173700,42 @@
       "CPU": "Quad-core 1.3 GHz Cortex-A53",
       "GPU": "PowerVR GE8100",
       "SoC": "Mediatek MT8765WB"
+    },
+    "v2571a": {
+      "model": "v2571a",
+      "hardware_vendor": "vivo",
+      "oem": "vivo",
+      "hardware_name": "s60",
+      "hardware_family": "s60",
+      "hardware_name_version": "s60",
+      "device_type": "smartphone",
+      "screen_inches_diagonal": "6.59",
+      "screen_pixels_width": "1260",
+      "screen_pixels_height": "2750",
+      "supported_bearers": "5G, 4G, 3G, 2G",
+      "cpu_architecture": "ARM",
+      "approx_device_age": "0",
+      "CPU": "Octa-core (1x3.0 GHz Cortex-X4 & 4x2.8 GHz Cortex-A720 & 3x2.0 GHz Cortex-A520)",
+      "GPU": "Adreno 735",
+      "SoC": "Qualcomm SM8635 Snapdragon 8s Gen 3 (4 nm)"
+    },
+    "v2572a": {
+      "model": "v2572a",
+      "hardware_vendor": "vivo",
+      "oem": "vivo",
+      "hardware_name": "s60vitality",
+      "hardware_family": "s60vitality",
+      "hardware_name_version": "s60 vitality",
+      "device_type": "smartphone",
+      "screen_inches_diagonal": "6.59",
+      "screen_pixels_width": "1260",
+      "screen_pixels_height": "2750",
+      "supported_bearers": "5G, 4G, 3G, 2G",
+      "cpu_architecture": "ARM",
+      "approx_device_age": "0",
+      "CPU": "Octa-core (4x2.6 GHz Arm C1 Pro & 4x2.0 GHz Arm C1 Nano)",
+      "GPU": "Mali-G625 MC",
+      "SoC": "Mediatek Dimensity 7500 (4 nm)"
     }
   }
 }

@@ -13,7 +13,8 @@
     "dev": "MODEL_PARSE_CACHE=1 node --watch server.js",
     "dev:full": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node --watch server.js",
     "dev:gsmarena": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node --watch server.js",
-    "test:mcp": "node scripts/test-mcp.mjs"
+    "test:mcp": "node scripts/test-mcp.mjs",
+    "crawl:quick": "cd crawler && python3 main.py --quick-update"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
