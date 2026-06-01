@@ -4,19 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "AUDIT_LOG=1 MODEL_PARSE_CACHE=1 node server.js",
+    "start": "AUDIT_LOG=1 MCP_ENABLED=1 MODEL_PARSE_CACHE=1 node server.js",
     "cert:dev": "mkdir -p .dev && openssl req -x509 -newkey rsa:2048 -keyout .dev/key.pem -out .dev/cert.pem -days 365 -nodes -subj /CN=localhost",
-    "start:https": "npm run cert:dev && USE_HTTPS=1 AUDIT_LOG=1 MODEL_PARSE_CACHE=1 node server.js",
+    "start:https": "npm run cert:dev && USE_HTTPS=1 AUDIT_LOG=1 MCP_ENABLED=1 MODEL_PARSE_CACHE=1 node server.js",
     "start:ai": "MODEL_PARSE_CACHE=1 AI_ANALYZE_BASE_URL=https://api.konsole.one node server.js",
     "start:full": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node server.js",
     "start:gsmarena": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node server.js",
     "dev": "MODEL_PARSE_CACHE=1 node --watch server.js",
     "dev:full": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node --watch server.js",
-    "dev:gsmarena": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node --watch server.js"
+    "dev:gsmarena": "GSMR_ENRICH_ALLOWED=1 UA_PARSE_CACHE=1 MODEL_PARSE_CACHE=1 node --watch server.js",
+    "test:mcp": "node scripts/test-mcp.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
-    "gsmarena-api": "^2.0.5"
+    "gsmarena-api": "^2.0.5",
+    "zod": "^4.4.3"
   }
 }

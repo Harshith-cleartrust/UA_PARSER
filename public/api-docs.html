@@ -29,6 +29,7 @@
           <code>Sec-CH-UA-*</code> headers are <em>not</em> merged automatically (use <code>/api/ch-probe</code> in
           the UI to copy them into the form).
         </p>
+        <p class="api-note">Click <strong>Copy</strong> on any route bar or code block to copy the full line or snippet.</p>
       </section>
 
       <section class="panel api-docs-intro">
@@ -39,20 +40,34 @@
           <strong>date-based file</strong>: <code>data/audit/YYYY-MM-DD.jsonl</code> (gitignored). Check
           <code>GET /api/health</code> → <code>auditLog</code> for today’s file path.
         </p>
-        <pre class="api-code">{"at":"2026-05-29T...","type":"parse","endpoint":"/api/parse","ip":"10.0.0.1","ok":true,"modelKey":"sma266b","durationMs":12,"userAgent":{"mode":"truncate","length":180,"value":"Mozilla/5.0 ..."}}</pre>
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Example line</span>
+            <button type="button" class="api-copy-btn" data-copy-target="audit-example" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="audit-example">{"at":"2026-05-29T...","type":"parse","endpoint":"/api/parse","ip":"10.0.0.1","ok":true,"modelKey":"sma266b","durationMs":12,"userAgent":{"mode":"truncate","length":180,"value":"Mozilla/5.0 ..."}}</pre>
+        </div>
         <p class="api-note">
           Env: <code>AUDIT_LOG_PATH</code>, <code>AUDIT_LOG_UA_MODE=truncate|full|hash</code>. Logs are not returned by the API — read the file on the server.
         </p>
       </section>
 
       <section class="panel api-endpoint" id="health">
-        <div class="api-endpoint-head">
-          <span class="api-method get">GET</span>
-          <h2><code>/api/health</code></h2>
+        <h2>Health</h2>
+        <div class="api-route-bar">
+          <div class="api-route-main">
+            <span class="api-method get">GET</span>
+            <span class="api-route-path">/api/health</span>
+          </div>
+          <button type="button" class="api-copy-btn" data-copy="GET /api/health" title="Copy endpoint"></button>
         </div>
         <p>Server status, parser version, dataset size, and cache flags.</p>
-        <h3>Response</h3>
-        <pre class="api-code">{
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Response</span>
+            <button type="button" class="api-copy-btn" data-copy-target="health-resp" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="health-resp">{
   "ok": true,
   "parserVersion": "0.3.56",
   "indexedModels": 8253,
@@ -60,35 +75,53 @@
   "gsmarenaAllowed": false,
   "modelParseCache": { "enabled": true, "entryCount": 9650, ... }
 }</pre>
+        </div>
       </section>
 
       <section class="panel api-endpoint" id="ch-probe">
-        <div class="api-endpoint-head">
-          <span class="api-method get">GET</span>
-          <h2><code>/api/ch-probe</code></h2>
+        <h2>Client Hints probe</h2>
+        <div class="api-route-bar">
+          <div class="api-route-main">
+            <span class="api-method get">GET</span>
+            <span class="api-route-path">/api/ch-probe</span>
+          </div>
+          <button type="button" class="api-copy-btn" data-copy="GET /api/ch-probe" title="Copy endpoint"></button>
         </div>
         <p>
           Echoes <code>Sec-CH-UA-*</code> headers the browser sent on this request (after
           <code>Accept-CH</code>). Used by the UI “Use this device” flow; same-origin only.
         </p>
-        <h3>Response</h3>
-        <pre class="api-code">{
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Response</span>
+            <button type="button" class="api-copy-btn" data-copy-target="ch-probe-resp" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="ch-probe-resp">{
   "clientHintsFromHeaders": {
     "secChUaModel": "\"SM-A266B\"",
     "secChUaMobile": "?1",
     "secChUaPlatform": "\"Android\""
   }
 }</pre>
+        </div>
       </section>
 
       <section class="panel api-endpoint" id="parse">
-        <div class="api-endpoint-head">
-          <span class="api-method post">POST</span>
-          <h2><code>/api/parse</code></h2>
+        <h2>Parse</h2>
+        <div class="api-route-bar">
+          <div class="api-route-main">
+            <span class="api-method post">POST</span>
+            <span class="api-route-path">/api/parse</span>
+          </div>
+          <button type="button" class="api-copy-btn" data-copy="POST /api/parse" title="Copy endpoint"></button>
         </div>
         <p>Main detection endpoint. Returns browser, platform, and hardware properties in one response (from <code>model_parse_cache.json</code> when cache mode is on).</p>
-        <h3>Request body</h3>
-        <pre class="api-code">{
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Request body</span>
+            <button type="button" class="api-copy-btn" data-copy-target="parse-req" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="parse-req">{
   "userAgent": "Mozilla/5.0 (Linux; Android 12; SM-A266B) ...",
   "clientHints": {
     "secChUaModel": "\"SM-A266B\"",
@@ -97,14 +130,18 @@
     "secChUaPlatformVersion": "\"16.0.0\""
   }
 }</pre>
+        </div>
         <p class="api-note">
           <code>clientHints</code> is optional. Keys: <code>secChUaModel</code>, <code>secChUaMobile</code>,
           <code>secChUaPlatform</code>, <code>secChUaPlatformVersion</code> (aliases like
           <code>Sec-CH-UA-Model</code> are normalized).
         </p>
-        <h3>Response (default)</h3>
-        <p class="api-note">Only <code>meta</code> and <code>properties</code> — no <code>debug</code>, <code>gsmarena</code>, or other fields.</p>
-        <pre class="api-code">{
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Response (default)</span>
+            <button type="button" class="api-copy-btn" data-copy-target="parse-resp" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="parse-resp">{
   "meta": {
     "parserVersion": "0.3.56",
     "deviceSet": "SMARTPHONE_HARDWARE_FLAT",
@@ -122,30 +159,44 @@
     "Android WebView": "No"
   }
 }</pre>
+        </div>
         <p class="api-note">
           Internal/debug fields: <code>?format=detailed</code> (used by the web UI only).
         </p>
       </section>
 
       <section class="panel api-endpoint" id="ai-analyze">
-        <div class="api-endpoint-head">
-          <span class="api-method post">POST</span>
-          <h2><code>/api/ai-analyze</code></h2>
+        <h2>AI risk analyze</h2>
+        <div class="api-route-bar">
+          <div class="api-route-main">
+            <span class="api-method post">POST</span>
+            <span class="api-route-path">/api/ai-analyze</span>
+          </div>
+          <button type="button" class="api-copy-btn" data-copy="POST /api/ai-analyze" title="Copy endpoint"></button>
         </div>
         <p>
           Risk analysis via Konsole AI. Runs local parser first, then merges AI score with parser signals (e.g. UA vs
           model Client Hint mismatch). Requires <code>AI_ANALYZE_API_KEY</code> on the server.
         </p>
-        <h3>Request body</h3>
-        <pre class="api-code">{
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Request body</span>
+            <button type="button" class="api-copy-btn" data-copy-target="ai-req" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="ai-req">{
   "userAgent": "Mozilla/5.0 ...",
   "clientHints": { "secChUaModel": "\"SM-A266B\"", "secChUaPlatform": "\"Android\"" }
 }</pre>
+        </div>
         <p class="api-note">
           <code>secChUaPlatformVersion</code> is stripped for AI analysis (not used for risk scoring).
         </p>
-        <h3>Response (summary)</h3>
-        <pre class="api-code">{
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Response (summary)</span>
+            <button type="button" class="api-copy-btn" data-copy-target="ai-resp" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="ai-resp">{
   "ok": true,
   "riskLevel": "low",
   "riskScore": 3,
@@ -154,15 +205,90 @@
   "recommendation": "...",
   "localDetection": { "properties": { ... }, "debug": { ... } }
 }</pre>
+        </div>
         <p class="api-note"><code>501</code> if AI is not configured on the server.</p>
+      </section>
+
+      <section class="panel api-endpoint" id="agents-register">
+        <h2>Agent registration</h2>
+        <div class="api-route-bar">
+          <div class="api-route-main">
+            <span class="api-method post">POST</span>
+            <span class="api-route-path">/api/agents/register</span>
+          </div>
+          <button type="button" class="api-copy-btn" data-copy="POST /api/agents/register" title="Copy endpoint"></button>
+        </div>
+        <p>Self-register an agent; returns a one-time <code>apiKey</code> for MCP tools.</p>
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Request body</span>
+            <button type="button" class="api-copy-btn" data-copy-target="register-req" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="register-req">{
+  "instanceId": "my-bot-uuid",
+  "agentName": "scanner-1"
+}</pre>
+        </div>
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Response</span>
+            <button type="button" class="api-copy-btn" data-copy-target="register-resp" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="register-resp">{
+  "apiKey": "uap_...",
+  "mcpEndpoint": "/mcp"
+}</pre>
+        </div>
+        <p class="api-note">
+          Or MCP tool <code>register_agent</code> with the same fields. Set <code>AGENT_REGISTRATION_SECRET</code> on the server to require <code>registrationSecret</code>.
+        </p>
+      </section>
+
+      <section class="panel api-endpoint" id="mcp">
+        <h2>MCP (agents)</h2>
+        <div class="api-route-bar">
+          <div class="api-route-main">
+            <span class="api-method post">POST</span>
+            <span class="api-route-path">/mcp</span>
+          </div>
+          <button type="button" class="api-copy-btn" data-copy="POST /mcp" title="Copy endpoint"></button>
+        </div>
+        <p>Model Context Protocol (Streamable HTTP). Agents self-register, then call tools with <code>apiKey</code> (when <code>MCP_AGENT_AUTH=1</code>).</p>
+        <p><strong>Tools</strong> (pass <code>apiKey</code> or <code>Authorization: Bearer …</code>):</p>
+        <ul>
+          <li><code>register_agent</code> — same as <code>/api/agents/register</code> (no key required)</li>
+          <li><code>parse_user_agent</code> — same result as <code>/api/parse</code> (slim JSON)</li>
+          <li><code>get_parser_health</code> — server status</li>
+          <li><code>analyze_ua_risk</code> — if AI is configured</li>
+        </ul>
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">Cursor config</span>
+            <button type="button" class="api-copy-btn" data-copy-target="mcp-cursor" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="mcp-cursor">{
+  "mcpServers": {
+    "ua-parser": {
+      "url": "https://YOUR_HOST/mcp"
+    }
+  }
+}</pre>
+        </div>
       </section>
 
       <section class="panel api-docs-intro">
         <h2 class="api-h2">Example: curl</h2>
-        <pre class="api-code">curl -s -X POST https://YOUR_HOST/api/parse \
+        <div class="api-code-block">
+          <div class="api-code-toolbar">
+            <span class="api-code-label">curl</span>
+            <button type="button" class="api-copy-btn" data-copy-target="curl-parse" title="Copy"></button>
+          </div>
+          <pre class="api-code" id="curl-parse">curl -s -X POST https://YOUR_HOST/api/parse \
   -H "Content-Type: application/json" \
   -d '{"userAgent":"Mozilla/5.0 (Linux; Android 12; SM-A266B) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"}'</pre>
+        </div>
       </section>
     </main>
+    <script src="/api-docs.js"></script>
   </body>
 </html>

@@ -49,6 +49,9 @@ import {
   auditParseRequest,
   auditAiAnalyzeRequest,
 } from "./lib/auditLog.js";
+import { parseApiResponseBody, propertyMap } from "./lib/parseApi.js";
+import { registerAgent, agentRegistryStatus } from "./lib/agentRegistry.js";
+import { mountMcpRoutes } from "./lib/mcpServer.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USE_HTTPS = process.env.USE_HTTPS === "1";
@@ -62,6 +65,7 @@ const AI_ANALYZE_ENDPOINT =
   process.env.AI_ANALYZE_ENDPOINT?.trim() || `${AI_ANALYZE_BASE_URL}/v1/chat/completions`;
 const AI_ANALYZE_API_KEY = process.env.AI_ANALYZE_API_KEY?.trim() || process.env.KONSOLE_API_KEY?.trim() || "";
 const AI_ANALYZE_MODEL = process.env.AI_ANALYZE_MODEL?.trim() || "gpt-5.4";
+const MCP_ENABLED = process.env.MCP_ENABLED !== "0";
 
 /** HVMS dataset; GSMArena learns append new rows here when `LEARN_DEVICE_DB` is on. Override with `DEVICE_DATASET`. */
 const datasetPath = process.env.DEVICE_DATASET || defaultDatasetPath();
@@ -391,7 +395,34 @@ app.get("/api/health", (_req, res) => {
     uaParseCache: uaParseCacheStatus(),
     modelParseCache: modelParseCacheStatus(),
     auditLog: auditLogStatus(),
+    agentRegistry: agentRegistryStatus(),
+    mcp: { enabled: MCP_ENABLED, endpoint: MCP_ENABLED ? "/mcp" : null },
   });
+});
+
+app.post("/api/agents/register", async (req, res) => {
+  try {
+    const out = await registerAgent({
+      instanceId: req.body?.instanceId,
+      agentName: req.body?.agentName,
+      registrationSecret: req.body?.registrationSecret,
+    });
+    if (!out.ok) {
+      res.status(403).json(out);
+      return;
+    }
+    res.json({
+      ok: true,
+      agentId: out.agentId,
+      agentName: out.agentName,
+      instanceId: out.instanceId,
+      apiKey: out.apiKey,
+      message: out.message,
+      mcpEndpoint: "/mcp",
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err?.message || err) });
+  }
 });
 
 app.get("/api/parse-jobs/:jobId", (req, res) => {
@@ -570,41 +601,6 @@ function parseAiRiskAnalysis(raw) {
   } catch {
     return fallback;
   }
-}
-
-function propertyMap(result) {
-  const out = {};
-  for (const row of result?.properties || []) {
-    if (row?.property) out[row.property] = row.value;
-  }
-  return out;
-}
-
-/** Public API shape: only meta + flat properties (Postman / integrations). */
-function slimParseApiResponse(result) {
-  const meta = result?.meta || {};
-  return {
-    meta: {
-      parserVersion: meta.parserVersion,
-      deviceSet: meta.deviceSet,
-      deviceDbVersion: meta.deviceDbVersion,
-      deviceDbLastUpdated: meta.deviceDbLastUpdated,
-      indexedModels: meta.indexedModels,
-      parseTimeMs: meta.parseTimeMs,
-    },
-    properties: propertyMap(result),
-  };
-}
-
-/**
- * Default: slim JSON (`meta` + flat `properties` only).
- * `?format=detailed` — full internal payload (array properties, debug, gsmarena) for the web UI.
- */
-function parseApiResponseBody(result, format) {
-  if (String(format || "").toLowerCase() === "detailed") {
-    return result;
-  }
-  return slimParseApiResponse(result);
 }
 
 async function buildLocalDetectionContext(userAgent, clientHints) {
@@ -1018,6 +1014,86 @@ app.post("/api/parse", async (req, res) => {
     res.status(500).json({ error: String(err?.message || err) });
   }
 });
+
+if (MCP_ENABLED) {
+  mountMcpRoutes(app, {
+    deviceCatalog,
+    gsmarenaAllowed: GSMR_ENRICH_ALLOWED,
+    queueLookupJob: (input) => {
+      const job = queueLookupJob(input);
+      return publicLookupJob(job);
+    },
+    aiAnalyzeConfigured: Boolean(AI_ANALYZE_API_KEY),
+    runAiAnalyze: async (userAgent, clientHints) => {
+      if (!AI_ANALYZE_API_KEY) {
+        return { ok: false, error: "ai_analyze_not_configured" };
+      }
+      try {
+        const clientHintsUsedForAi = { ...clientHints };
+        delete clientHintsUsedForAi.secChUaPlatformVersion;
+        const localDetection = await buildLocalDetectionContext(userAgent, clientHintsUsedForAi);
+        const clientHintsForPrompt = clientHintsWithoutPlatformVersionForAi(clientHints);
+        const localForPrompt = localDetectionSnapshotForAiPrompt(localDetection);
+        const prompt = [
+          "Risk-analyze this User-Agent and optional Client Hints.",
+          `User-Agent: ${userAgent || "(empty)"}`,
+          `Client Hints: ${JSON.stringify(clientHintsForPrompt)}`,
+          `Local detection: ${JSON.stringify(localForPrompt)}`,
+          'Return JSON: {"riskLevel":"high|medium|low","riskScore":1-10,"summary":"...","reasons":[],"recommendation":"..."}',
+        ].join("\n");
+        const upstream = await fetch(AI_ANALYZE_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-app-key": AI_ANALYZE_API_KEY,
+            Authorization: `Bearer ${AI_ANALYZE_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: AI_ANALYZE_MODEL,
+            messages: [
+              { role: "system", content: "Return only valid JSON for UA risk analysis." },
+              { role: "user", content: prompt },
+            ],
+            stream: false,
+          }),
+        });
+        const text = await upstream.text();
+        let data = null;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = null;
+        }
+        if (!upstream.ok) {
+          return {
+            ok: false,
+            error: "ai_analyze_upstream_error",
+            message: data?.error?.message || data?.message || text.slice(0, 500),
+          };
+        }
+        const analysis =
+          data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || data?.message || "";
+        const riskRaw = parseAiRiskAnalysis(analysis);
+        const { parsed: risk } = mergeAiRiskWithLocalDetection(riskRaw, localDetection, {
+          userAgent,
+          clientHintsRaw: clientHintsForPrompt,
+        });
+        const riskOut = scrubChPlatformVersionClaimsFromAiRisk(risk);
+        return {
+          ok: true,
+          riskLevel: riskOut.riskLevel,
+          riskScore: riskOut.riskScore,
+          summary: riskOut.summary,
+          reasons: riskOut.reasons,
+          recommendation: riskOut.recommendation,
+        };
+      } catch (err) {
+        return { ok: false, error: "ai_analyze_failed", message: String(err?.message || err) };
+      }
+    },
+  });
+  console.error("MCP: ON — POST /mcp (tools: register_agent, parse_user_agent, get_parser_health)");
+}
 
 function createAppServer() {
   if (USE_HTTPS && fs.existsSync(DEV_CERT) && fs.existsSync(DEV_KEY)) {

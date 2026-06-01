@@ -871,6 +871,82 @@ tbody tr:last-child td {
   margin-bottom: 1rem;
 }
 
+.api-route-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.65rem 0.55rem 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: rgba(8, 10, 16, 0.55);
+}
+
+.api-route-main {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.api-route-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.92rem;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.api-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  padding: 0.35rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.api-copy-btn:hover,
+.api-copy-btn.copied {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.api-copy-icon {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
+.api-code-block {
+  margin-top: 0.5rem;
+}
+
+.api-code-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.api-code-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .api-endpoint-head {
   display: flex;
   align-items: center;
@@ -879,8 +955,8 @@ tbody tr:last-child td {
   margin-bottom: 0.5rem;
 }
 
-.api-endpoint h2 {
-  margin: 0;
+.api-endpoint > h2 {
+  margin: 0 0 0.65rem;
   font-size: 1.05rem;
   font-weight: 600;
 }
@@ -920,7 +996,7 @@ tbody tr:last-child td {
 }
 
 .api-code {
-  margin: 0.5rem 0 0;
+  margin: 0;
   padding: 0.85rem 1rem;
   border-radius: var(--radius);
   border: 1px solid var(--border);
