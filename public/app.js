@@ -524,11 +524,18 @@ function renderRiskHeader(risk, score) {
   if (!risk) return "<h3>AI Analyze</h3>";
   const scoreClass = riskFromScore(score) || risk;
   const deg = score == null ? 0 : Math.round((score / 10) * 360);
+  const tierLabel =
+    score == null
+      ? `Risk: ${risk.toUpperCase()}`
+      : `Risk: ${risk.toUpperCase()} (${score}/10)`;
   return [
     '<div class="risk-header">',
+    '<div class="risk-header-main">',
     '<span class="risk-label">AI Analyze</span>',
+    `<span class="risk-tier-line">${tierLabel}</span>`,
+    "</div>",
     '<div class="risk-summary">',
-    `<span class="risk-gauge ${scoreClass}" style="--risk-deg:${deg}deg"><span>${score ?? "?"}</span></span>`,
+    `<span class="risk-gauge ${scoreClass}" style="--risk-deg:${deg}deg" aria-label="${tierLabel}"><span>${score ?? "?"}</span></span>`,
     `<span class="risk-badge ${risk}">${risk.toUpperCase()} RISK</span>`,
     "</div>",
     "</div>",
@@ -582,6 +589,7 @@ function formatAiAnalysis(raw) {
     const heading = line.match(/^\*\*(.+?)\*\*$/);
     if (heading) {
       closeList();
+      if (/^Risk:/i.test(heading[1])) continue;
       html.push(`<h4>${escapeHtml(heading[1])}</h4>`);
       continue;
     }

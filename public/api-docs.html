@@ -4,15 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>API documentation — User-Agent Parser</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("ua-parser-theme");
+          if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css?v=30" />
   </head>
   <body>
     <header class="header">
       <div class="header-copy">
-        <span class="header-kicker">Reference</span>
-        <h1>API documentation</h1>
+        <div class="header-brand-row">
+          <span class="header-logo" aria-hidden="true">A</span>
+          <span class="header-kicker">UA Intelligence</span>
+        </div>
+        <h1><span class="text-gradient">API</span> documentation</h1>
       </div>
       <div class="header-actions">
+        <div class="theme-toggle" role="group" aria-label="Color theme">
+          <button type="button" class="theme-btn" data-theme-btn="light" aria-pressed="false" title="Light mode" aria-label="Light mode">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
+          </button>
+          <button type="button" class="theme-btn is-active" data-theme-btn="dark" aria-pressed="true" title="Dark mode" aria-label="Dark mode">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A7.5 7.5 0 0 1 9.5 4 6 6 0 1 0 20 14.5Z" fill="currentColor"/></svg>
+          </button>
+        </div>
         <a href="/" class="header-docs-link">← Back to parser</a>
       </div>
     </header>
@@ -289,6 +311,7 @@
         </div>
       </section>
     </main>
+    <script src="/theme.js"></script>
     <script src="/api-docs.js"></script>
   </body>
 </html>
