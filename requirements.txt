@@ -1,0 +1,3 @@
+# UA Parser — Python dependencies (GSMArena crawler)
+# Web/API: npm install (package.json name: ua_parser)
+-r crawler/requirements.txt
