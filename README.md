@@ -13,7 +13,7 @@ Parse User-Agent strings and Client Hints into browser, OS, and hardware fields.
 | `npm run start:https` | `npm run start:gsmarena`, `start:full`, `dev:gsmarena`, `dev:full` |
 | `MODEL_PARSE_CACHE=1` (default in npm scripts) | Live GSMArena on each **Detect** |
 | `dataset_files/model_parse_cache.json` | `GSMR_ENRICH_ALLOWED` in `.env` (no effect while cache-only is on) |
-| `npm run crawl:quick` (or scheduled crawler) | Background `lookupJob` / UA parse cache layers |
+| `npm run crawl:quick` (manual crawler) | Background `lookupJob` / UA parse cache layers |
 | `.env`: `FIRECRAWL_API_KEY` (crawler), `AI_ANALYZE_API_KEY` | Per-request `gsmarena-api` enrich |
 
 **Loop:** start server → **Detect** reads cache → run crawler when you need new phones → **restart server** after the JSON file changes.
@@ -70,7 +70,7 @@ Important today: `FIRECRAWL_API_KEY`, `AI_ANALYZE_API_KEY` / `KONSOLE_API_KEY`.
 - Writes slim rows into **`model_parse_cache.json`** (same 17 fields as cache entries in the repo).
 - **Quick update** = GSMArena **page 1 only** per brand.
 - `↪ no valid model codes` = page OK but no SKU to store (common on basic phones).
-- Optional schedule: `crawler/com.harshithr.crawler.quick-update.plist` → LaunchAgents (09:00 & 21:00).
+- Crawl manually: `npm run crawl:quick` or `python3 crawler/main.py --quick-update` (no macOS LaunchAgent schedule).
 
 More detail: [crawler/README.md](crawler/README.md) (pointer only).
 

@@ -168,6 +168,32 @@ HTTP_HEADERS = {
     ),
 }
 
+RE_RESOLUTION = re.compile(r"(\d+)\s*x\s*(\d+)", re.IGNORECASE)
+RE_SCREEN_INCHES = re.compile(r"([\d.]+)\s*inches?", re.IGNORECASE)
+RE_YEAR = re.compile(r"\b(20\d{2})\b")
+RE_LISTING_PAGE = re.compile(r"-p(\d+)\.php$")
+RE_VALID_MODEL_DIGIT = re.compile(r"\d")
+RE_DS_COMBINED = re.compile(r"\d[a-z]$")
+RE_DEVICE_YEAR_PAREN = re.compile(r"\(20\d{2}\)")
+RE_DEVICE_YEAR_WORD = re.compile(r"\b20\d{2}\b")
+
+JSON_SAVE_INDENT = None if os.environ.get("CRAWLER_JSON_INDENT", "1") == "0" else 2
+JSON_SAVE_SEPARATORS = (",", ":") if JSON_SAVE_INDENT is None else (",", ": ")
+
+_http_session = None
+
+
+def get_http_session():
+    global _http_session
+    if _http_session is None:
+        _http_session = requests.Session()
+        _http_session.headers.update(HTTP_HEADERS)
+    return _http_session
+
+
+def _soup(html):
+    return BeautifulSoup(html, "html.parser")
+
 
 def na(value):
     if value is None:
@@ -273,7 +299,7 @@ def direct_fetch(url, retries=5):
 
     for attempt in range(retries):
         try:
-            response = requests.get(url, headers=HTTP_HEADERS, timeout=30)
+            response = get_http_session().get(url, timeout=30)
             if response.status_code == 200:
                 return response.text
             if response.status_code == 429:
@@ -293,11 +319,11 @@ def direct_fetch(url, retries=5):
 
 
 def count_devices_in_html(html):
-    return len(BeautifulSoup(html, "html.parser").select(".makers li a"))
+    return len(_soup(html).select(".makers li a"))
 
 
 def html_has_specs(html):
-    return bool(BeautifulSoup(html, "html.parser").select("table tr td.ttl"))
+    return bool(_soup(html).select("table tr td.ttl"))
 
 
 def fetch_html(url, expect_devices=False, expect_specs=False):
@@ -357,42 +383,11 @@ def load_progress_file():
 
 
 def load_data():
-    if os.path.exists(OUTPUT_FILE):
-        with open(OUTPUT_FILE, "r", encoding="utf-8") as handle:
-            raw = json.load(handle)
-        data = normalize_loaded_data(raw)
-
-        # Prefer progress from the separate file when it exists; if not yet, the
-        # progress block embedded in output.json (legacy layout) is the seed.
-        external = load_progress_file()
-        if external is not None:
-            data["progress"] = external
-            migrate_progress(data)
-        return data
-
-    legacy_dataset = os.path.join(
-        SCRIPT_DIR, "datasets", "smartphone_hardware_test_dataset.json"
-    )
-    if os.path.exists(legacy_dataset):
-        with open(legacy_dataset, "r", encoding="utf-8") as handle:
-            legacy = json.load(handle)
-        legacy_devices = legacy.get("devices", legacy if isinstance(legacy, list) else [])
-        if isinstance(legacy_devices, dict):
-            legacy_devices = devices_map_to_list(legacy_devices)
-        data = normalize_loaded_data(
-            {"devices": legacy_devices, "progress": {"brand_index": 0}}
-        )
-        external = load_progress_file()
-        if external is not None:
-            data["progress"] = external
-            migrate_progress(data)
-        return data
-
-    data = default_output()
-    external = load_progress_file()
-    if external is not None:
-        data["progress"] = external
-        migrate_progress(data)
+    store = CacheDataset.load_from_disk()
+    progress = load_progress_file() or {"brand_index": 0}
+    data = {"_store": store, "progress": progress}
+    migrate_progress(data)
+    compact_complete_phones_for_save(data["progress"], store)
     return data
 
 
@@ -406,29 +401,163 @@ def is_corrupted_model(model, vendor, hardware_name=""):
     return False
 
 
+def resolve_entry_key(vendor, name, model, existing):
+    """Storage key for one cache row; `existing` is the entries dict."""
+    vendor = vendor or "unknown"
+    name = name or "unknown"
+    if not is_corrupted_model(model, vendor, name):
+        key = model
+        if key in existing:
+            prev = existing[key]
+            prev_v = prev.get("hardware_vendor")
+            if prev_v and vendor and prev_v != vendor:
+                key = f"{vendor}_{model}"
+            else:
+                key = f"{vendor}_{name}_{model}"
+    else:
+        key = f"{vendor}_{name}"
+    return key
+
+
+def slim_entry_fields(entry):
+    formatted = format_device_entry(dict(entry))
+    return {field: formatted[field] for field in DEVICE_FIELDS}
+
+
+class CacheDataset:
+    """In-memory model_parse_cache with vendor/model indexes (avoids list↔map on every save)."""
+
+    __slots__ = ("entries", "phones_by_vendor", "model_keys")
+
+    def __init__(self, entries=None):
+        self.entries = entries if isinstance(entries, dict) else {}
+        self.phones_by_vendor = {}
+        self.model_keys = set()
+        self._rebuild_indexes()
+
+    def _rebuild_indexes(self):
+        self.phones_by_vendor = {}
+        self.model_keys = set()
+        for fields in self.entries.values():
+            if not isinstance(fields, dict):
+                continue
+            vendor = (fields.get("hardware_vendor") or "").strip().lower()
+            name = fields.get("hardware_name")
+            model = fields.get("model")
+            if vendor and name:
+                self.phones_by_vendor.setdefault(vendor, set()).add(name)
+            if vendor and model and model != NA and is_valid_model_code(model):
+                self.model_keys.add(vendor_model_dedupe_key(vendor, model))
+
+    def __len__(self):
+        return len(self.entries)
+
+    def phones_for_vendor(self, brand_name):
+        return self.phones_by_vendor.get((brand_name or "").lower(), set())
+
+    def add_entry(self, entry, existing_keys=None):
+        slim = slim_entry_fields(entry)
+        vendor = slim.get("hardware_vendor") or "unknown"
+        name = slim.get("hardware_name") or "unknown"
+        model = slim.get("model")
+        if not is_corrupted_model(model, vendor, name):
+            slim["model"] = model
+        else:
+            slim["model"] = NA
+        key = resolve_entry_key(vendor, name, slim["model"], self.entries)
+        self.entries[key] = slim
+        vlow = vendor.lower()
+        if vlow and name:
+            self.phones_by_vendor.setdefault(vlow, set()).add(name)
+        if (
+            vlow
+            and slim["model"] != NA
+            and is_valid_model_code(slim["model"])
+        ):
+            dedupe = vendor_model_dedupe_key(vendor, slim["model"])
+            self.model_keys.add(dedupe)
+            if existing_keys is not None:
+                existing_keys.add(dedupe)
+        return key
+
+    def as_list(self):
+        return devices_map_to_list(self.entries)
+
+    def write_atomic(self, progress):
+        output_dir = os.path.dirname(OUTPUT_FILE)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        payload = {"version": 1, "entries": self.entries}
+        temp_path = OUTPUT_FILE + ".tmp"
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                payload,
+                handle,
+                indent=JSON_SAVE_INDENT,
+                ensure_ascii=False,
+                separators=JSON_SAVE_SEPARATORS,
+            )
+        os.replace(temp_path, OUTPUT_FILE)
+
+        progress_dir = os.path.dirname(PROGRESS_FILE)
+        if progress_dir:
+            os.makedirs(progress_dir, exist_ok=True)
+        progress_payload = {
+            "progress": progress,
+            "last_updated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        temp_progress = PROGRESS_FILE + ".tmp"
+        with open(temp_progress, "w", encoding="utf-8") as handle:
+            json.dump(
+                progress_payload,
+                handle,
+                indent=JSON_SAVE_INDENT,
+                ensure_ascii=False,
+                separators=JSON_SAVE_SEPARATORS,
+            )
+        os.replace(temp_progress, PROGRESS_FILE)
+
+    @classmethod
+    def load_from_disk(cls):
+        if os.path.exists(OUTPUT_FILE):
+            with open(OUTPUT_FILE, "r", encoding="utf-8") as handle:
+                raw = json.load(handle)
+            if isinstance(raw, dict) and isinstance(raw.get("entries"), dict):
+                return cls(raw["entries"])
+            data = normalize_loaded_data(raw)
+            return cls(devices_list_to_map(data["devices"]))
+
+        legacy_dataset = os.path.join(
+            SCRIPT_DIR, "datasets", "smartphone_hardware_test_dataset.json"
+        )
+        if os.path.exists(legacy_dataset):
+            with open(legacy_dataset, "r", encoding="utf-8") as handle:
+                legacy = json.load(handle)
+            legacy_devices = legacy.get("devices", legacy if isinstance(legacy, list) else [])
+            if isinstance(legacy_devices, dict):
+                legacy_devices = devices_map_to_list(legacy_devices)
+            data = normalize_loaded_data(
+                {"devices": legacy_devices, "progress": {"brand_index": 0}}
+            )
+            return cls(devices_list_to_map(data["devices"]))
+
+        return cls({})
+
+
+def get_store(data):
+    return data["_store"]
+
+
 def devices_list_to_map(devices):
     result = {}
     for device in devices:
         model = device.get("model")
         vendor = device.get("hardware_vendor") or "unknown"
         name = device.get("hardware_name") or "unknown"
-
-        if not is_corrupted_model(model, vendor, name):
-            key = model
-            if key in result:
-                prev = result[key]
-                prev_v = prev.get("hardware_vendor")
-                if prev_v and vendor and prev_v != vendor:
-                    key = f"{vendor}_{model}"
-                else:
-                    # Same vendor: should not happen after dedupe; keep stable key.
-                    key = f"{vendor}_{name}_{model}"
-        else:
-            key = f"{vendor}_{name}"
-
+        key = resolve_entry_key(vendor, name, model, result)
         device["model"] = model if not is_corrupted_model(model, vendor, name) else NA
-        entry = format_device_entry(device)
-        result[key] = {field: entry[field] for field in DEVICE_FIELDS}
+        result[key] = slim_entry_fields(device)
     return result
 
 
@@ -507,38 +636,10 @@ def normalize_loaded_data(data):
 
 
 def save_data(data):
-    output_dir = os.path.dirname(OUTPUT_FILE)
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-
-    devices_list = data.get("devices", [])
+    store = get_store(data)
     progress = data.get("progress", {"brand_index": 0})
-    compact_complete_phones_for_save(progress, devices_list)
-
-    now = time.strftime("%Y-%m-%dT%H:%M:%S")
-
-    # model_parse_cache.json: { version, entries } — slim hardware rows only (see DEVICE_FIELDS).
-    devices_payload = {
-        "version": 1,
-        "entries": devices_list_to_map(devices_list),
-    }
-    temp_path = OUTPUT_FILE + ".tmp"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(devices_payload, handle, indent=2, ensure_ascii=False)
-    os.replace(temp_path, OUTPUT_FILE)
-
-    progress_dir = os.path.dirname(PROGRESS_FILE)
-    if progress_dir:
-        os.makedirs(progress_dir, exist_ok=True)
-
-    progress_payload = {
-        "progress": progress,
-        "last_updated": now,
-    }
-    temp_progress = PROGRESS_FILE + ".tmp"
-    with open(temp_progress, "w", encoding="utf-8") as handle:
-        json.dump(progress_payload, handle, indent=2, ensure_ascii=False)
-    os.replace(temp_progress, PROGRESS_FILE)
+    compact_complete_phones_for_save(progress, store)
+    store.write_atomic(progress)
 
 
 def log_message(data, message):
@@ -560,9 +661,15 @@ def set_progress(data, brand_index):
     data["progress"]["brand_index"] = brand_index
 
 
-def _merge_complete_phones_raw(progress, devices, brand_name):
+def _phones_in_dataset(devices_or_store, brand_name):
+    if isinstance(devices_or_store, CacheDataset):
+        return devices_or_store.phones_for_vendor(brand_name)
+    return unique_phones_in_data(devices_or_store, brand_name)
+
+
+def _merge_complete_phones_raw(progress, devices_or_store, brand_name):
     """Set of listing hardware_name values treated as done for this vendor."""
-    in_data = unique_phones_in_data(devices, brand_name)
+    in_data = _phones_in_dataset(devices_or_store, brand_name)
     raw = (progress.get("complete_phones") or {}).get(brand_name)
     if isinstance(raw, list):
         return in_data | set(raw)
@@ -584,10 +691,10 @@ def _count_from_complete(raw):
     return 0
 
 
-def mark_phone_complete(progress, brand_name, hardware_name, devices):
+def mark_phone_complete(progress, brand_name, hardware_name, devices_or_store):
     """Store a single integer per brand (count of completed phones)."""
     complete = progress.setdefault("complete_phones", {})
-    in_data = unique_phones_in_data(devices, brand_name)
+    in_data = _phones_in_dataset(devices_or_store, brand_name)
 
     if hardware_name in in_data:
         # Dataset already covers this name; recompute from dataset + any legacy extras.
@@ -607,14 +714,14 @@ def mark_phone_complete(progress, brand_name, hardware_name, devices):
     complete[brand_name] = base + 1
 
 
-def compact_complete_phones_for_save(progress, devices):
+def compact_complete_phones_for_save(progress, devices_or_store):
     """Normalize complete_phones to a plain integer per brand."""
     complete = progress.get("complete_phones")
     if not isinstance(complete, dict):
         return
     for brand_name in list(complete.keys()):
         raw = complete.get(brand_name)
-        in_data = unique_phones_in_data(devices, brand_name)
+        in_data = _phones_in_dataset(devices_or_store, brand_name)
         if isinstance(raw, int):
             complete[brand_name] = max(raw, len(in_data))
         elif isinstance(raw, list):
@@ -627,7 +734,7 @@ def compact_complete_phones_for_save(progress, devices):
             complete[brand_name] = len(in_data)
 
 
-def merge_complete_phones(data, devices, brand_name):
+def merge_complete_phones(data, devices_or_store, brand_name):
     if SKIP_SEED_COMPLETE:
         raw = (data["progress"].get("complete_phones") or {}).get(brand_name)
         if isinstance(raw, list):
@@ -637,7 +744,7 @@ def merge_complete_phones(data, devices, brand_name):
         if isinstance(raw, int):
             return set()
         return set()
-    return _merge_complete_phones_raw(data["progress"], devices, brand_name)
+    return _merge_complete_phones_raw(data["progress"], devices_or_store, brand_name)
 
 
 def unique_phones_in_data(devices, brand_name):
@@ -649,11 +756,12 @@ def unique_phones_in_data(devices, brand_name):
     }
 
 
-def get_effective_start_index(brands, devices, data, quiet=False):
+def get_effective_start_index(brands, data, quiet=False, devices_or_store=None):
     migrate_progress(data)
     progress = data["progress"]
     listed_map = progress.get("listed_phones", {})
     saved_index = progress.get("brand_index", 0)
+    store = devices_or_store or get_store(data)
 
     for idx, brand in enumerate(brands):
         brand_name = brand["brand"]
@@ -662,7 +770,7 @@ def get_effective_start_index(brands, devices, data, quiet=False):
         if brand_name in SKIP_VENDORS:
             continue
 
-        stored_count = len(unique_phones_in_data(devices, brand_name))
+        stored_count = len(store.phones_for_vendor(brand_name))
         listed_count = listed_map.get(brand_name)
 
         if listed_count is None:
@@ -690,7 +798,7 @@ def is_valid_model_code(code):
     normalized = code.strip().lower().replace("-", "")
     if normalized in MODEL_SKIP or len(normalized) < 4:
         return False
-    return bool(re.search(r"\d", normalized))
+    return bool(RE_VALID_MODEL_DIGIT.search(normalized))
 
 
 def vendor_model_dedupe_key(vendor, model):
@@ -715,7 +823,7 @@ def expand_model_token(token):
         if is_valid_model_code(base):
             expanded.append(base)
         if suffix:
-            if suffix in ("ds", "dsn") and re.search(r"\d[a-z]$", base):
+            if suffix in ("ds", "dsn") and RE_DS_COMBINED.search(base):
                 combined = base[:-1] + suffix
             else:
                 combined = f"{base}{suffix}"
@@ -795,28 +903,12 @@ def dedupe_devices(devices):
     return list(by_key.values())
 
 
-def existing_device_keys(devices):
-    keys = set()
-    for device in devices:
-        vendor = device.get("hardware_vendor")
-        name = device.get("hardware_name")
-        model = device.get("model")
-        if not vendor or not name:
-            continue
-        vkey = (vendor or "").strip().lower()
-        if model and model != NA and is_valid_model_code(model):
-            keys.add(vendor_model_dedupe_key(vendor, model))
-        else:
-            keys.add((vkey, name, model or NA))
-    return keys
-
-
 # ---------------------------------
 # HTML PARSING HELPERS
 # ---------------------------------
 
 def parse_spec_rows(html):
-    soup = BeautifulSoup(html, "html.parser")
+    soup = _soup(html)
     specs = {}
 
     for row in soup.select("table tr"):
@@ -844,7 +936,7 @@ def parse_spec_rows(html):
 def parse_resolution(text):
     if not text:
         return NA, NA
-    match = re.search(r"(\d+)\s*x\s*(\d+)", text, re.IGNORECASE)
+    match = RE_RESOLUTION.search(text)
     if match:
         return match.group(1), match.group(2)
     return NA, NA
@@ -853,7 +945,7 @@ def parse_resolution(text):
 def parse_screen_inches(text):
     if not text:
         return NA
-    match = re.search(r"([\d.]+)\s*inches?", text, re.IGNORECASE)
+    match = RE_SCREEN_INCHES.search(text)
     return match.group(1) if match else NA
 
 
@@ -1055,7 +1147,7 @@ def repair_json_file(path):
 
 def parse_approx_device_age(specs):
     announced = specs.get("announced") or specs.get("status") or ""
-    years = re.findall(r"\b(20\d{2})\b", announced)
+    years = RE_YEAR.findall(announced)
     if not years:
         return NA
 
@@ -1081,8 +1173,8 @@ def extract_models_from_specs(specs):
 
 def normalize_device_name(raw_name, brand_name):
     name_without_brand = raw_name.replace(brand_name, "")
-    name_without_brand = re.sub(r"\(20\d{2}\)", "", name_without_brand)
-    name_without_brand = re.sub(r"\b20\d{2}\b", "", name_without_brand)
+    name_without_brand = RE_DEVICE_YEAR_PAREN.sub("", name_without_brand)
+    name_without_brand = RE_DEVICE_YEAR_WORD.sub("", name_without_brand)
 
     gen_match = re.search(r"\((.*?)\)", name_without_brand)
     generation_suffix = ""
@@ -1146,7 +1238,7 @@ def get_brands():
     if not html:
         return []
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = _soup(html)
     return [
         {"brand": anchor.text.strip().lower(), "url": normalize_url(anchor["href"])}
         for anchor in soup.select(".brandmenu-v2 li a")
@@ -1160,7 +1252,7 @@ def get_brand_listing_urls(brand_url, soup):
 
     for anchor in soup.select(".nav-pages a[href]"):
         href = anchor.get("href", "").strip()
-        match = re.search(r"-p(\d+)\.php$", href)
+        match = RE_LISTING_PAGE.search(href)
         if not match:
             continue
         max_page = max(max_page, int(match.group(1)))
@@ -1184,7 +1276,7 @@ def get_latest_devices(brand_url):
     if not first_html:
         return []
 
-    first_soup = BeautifulSoup(first_html, "html.parser")
+    first_soup = _soup(first_html)
     page_urls = get_brand_listing_urls(brand_url, first_soup)
 
     for page_num, page_url in enumerate(page_urls):
@@ -1196,7 +1288,7 @@ def get_latest_devices(brand_url):
             if not html:
                 print(f"⚠ Skipping page {page_num + 1}/{len(page_urls)}: {page_url}")
                 continue
-            soup = BeautifulSoup(html, "html.parser")
+            soup = _soup(html)
 
         for item in soup.select(".makers li a"):
             href = normalize_url(item["href"])
@@ -1214,7 +1306,7 @@ def get_first_page_devices(brand_url):
     if not first_html:
         return []
 
-    soup = BeautifulSoup(first_html, "html.parser")
+    soup = _soup(first_html)
     out = []
     seen_hrefs = set()
     for item in soup.select(".makers li a"):
@@ -1287,8 +1379,8 @@ def run_update():
     _firecrawl_disabled = False
 
     data = load_data()
-    devices = data["devices"]
-    print(f"Dataset: {OUTPUT_FILE} ({len(devices)} entries loaded)")
+    store = get_store(data)
+    print(f"Dataset: {OUTPUT_FILE} ({len(store)} entries loaded)")
 
     if FIRECRAWL_API_KEY and USE_FIRECRAWL:
         log_message(data, "Firecrawl API key detected — will try Firecrawl first.")
@@ -1312,7 +1404,7 @@ def run_update():
 
     check_fetch_health()
 
-    existing_devices = existing_device_keys(devices)
+    existing_devices = store.model_keys
 
     brands = get_brands()
     if not brands:
@@ -1320,7 +1412,7 @@ def run_update():
         save_data(data)
         return
 
-    start_index = get_effective_start_index(brands, devices, data)
+    start_index = get_effective_start_index(brands, data, devices_or_store=store)
     total_brands = len(brands)
 
     if start_index >= total_brands:
@@ -1344,7 +1436,7 @@ def run_update():
         brand_name = brand["brand"]
 
         if brand_name in SKIP_VENDORS:
-            stored_now = len(unique_phones_in_data(devices, brand_name))
+            stored_now = len(store.phones_for_vendor(brand_name))
             data["progress"].setdefault("listed_phones", {})[brand_name] = stored_now
             set_progress(data, index + 1)
             log_message(
@@ -1379,7 +1471,7 @@ def run_update():
 
         data["progress"].setdefault("listed_phones", {})[brand_name] = listed_count
 
-        complete_phones = merge_complete_phones(data, devices, brand_name)
+        complete_phones = merge_complete_phones(data, store, brand_name)
         phones_to_fetch = listed_count - len(complete_phones)
         log_message(
             data,
@@ -1443,12 +1535,8 @@ def run_update():
             ]
 
             if not models_to_add:
-                if valid_models:
-                    mark_phone_complete(data["progress"], brand_name, clean_name, devices)
-                    complete_phones.add(clean_name)
-                else:
-                    mark_phone_complete(data["progress"], brand_name, clean_name, devices)
-                    complete_phones.add(clean_name)
+                mark_phone_complete(data["progress"], brand_name, clean_name, store)
+                complete_phones.add(clean_name)
                 skipped += 1
                 continue
 
@@ -1462,12 +1550,10 @@ def run_update():
                 entry = build_device_entry(
                     brand_name, clean_name, raw_name, model_code, specs
                 )
-                devices.append(entry)
-                m = entry["model"]
-                existing_devices.add(vendor_model_dedupe_key(brand_name, m))
+                store.add_entry(entry, existing_devices)
                 added += 1
 
-            mark_phone_complete(data["progress"], brand_name, clean_name, devices)
+            mark_phone_complete(data["progress"], brand_name, clean_name, store)
             complete_phones.add(clean_name)
 
             log_message(
@@ -1483,7 +1569,7 @@ def run_update():
         if phones_since_save:
             save_data(data)
 
-        stored_count = len(unique_phones_in_data(devices, brand_name))
+        stored_count = len(store.phones_for_vendor(brand_name))
         log_message(
             data,
             f"   {brand_name}: {added} new entries, {skipped} phones skipped, "
@@ -1520,8 +1606,8 @@ def run_quick_update():
     _firecrawl_disabled = False
 
     data = load_data()
-    devices = data["devices"]
-    print(f"Dataset: {OUTPUT_FILE} ({len(devices)} entries loaded)")
+    store = get_store(data)
+    print(f"Dataset: {OUTPUT_FILE} ({len(store)} entries loaded)")
 
     if FIRECRAWL_API_KEY and USE_FIRECRAWL:
         log_message(data, "Firecrawl API key detected — will try Firecrawl first.")
@@ -1545,7 +1631,7 @@ def run_quick_update():
 
     check_fetch_health()
 
-    existing_devices = existing_device_keys(devices)
+    existing_devices = store.model_keys
     brands = get_brands()
     if not brands:
         log_message(data, "❌ Could not fetch brands.")
@@ -1575,7 +1661,7 @@ def run_quick_update():
 
         # Source of truth: device rows in model_parse_cache (normalized hardware_name per vendor).
         # Do not treat progress-only "complete" markers as covering a phone that has no row yet.
-        phones_in_dataset = unique_phones_in_data(devices, brand_name)
+        phones_in_dataset = store.phones_for_vendor(brand_name)
         complete_phones = set(phones_in_dataset)
         to_process = []
         missing_from_dataset = 0
@@ -1676,7 +1762,7 @@ def run_quick_update():
                         data,
                         f"   ↪ {clean_name}: specs OK — no valid model codes parsed from GSM page",
                     )
-                mark_phone_complete(data["progress"], brand_name, clean_name, devices)
+                mark_phone_complete(data["progress"], brand_name, clean_name, store)
                 complete_phones.add(clean_name)
                 skipped += 1
                 continue
@@ -1691,12 +1777,10 @@ def run_quick_update():
                 entry = build_device_entry(
                     brand_name, clean_name, raw_name, model_code, specs
                 )
-                devices.append(entry)
-                m = entry["model"]
-                existing_devices.add(vendor_model_dedupe_key(brand_name, m))
+                store.add_entry(entry, existing_devices)
                 added += 1
 
-            mark_phone_complete(data["progress"], brand_name, clean_name, devices)
+            mark_phone_complete(data["progress"], brand_name, clean_name, store)
             complete_phones.add(clean_name)
 
             log_message(data, f"   ➕ {clean_name}: {', '.join(models_to_add)}")
@@ -1728,33 +1812,37 @@ def fix_output():
 
     try:
         with open(OUTPUT_FILE, "r", encoding="utf-8") as handle:
-            raw = json.load(handle)
+            json.load(handle)
         print(f"Loaded {OUTPUT_FILE} (valid JSON).")
-        data = normalize_loaded_data(raw)
+        data = load_data()
     except json.JSONDecodeError:
         print("Repairing broken JSON structure...")
-        data = normalize_loaded_data(repair_json_file(OUTPUT_FILE))
-
-    external = load_progress_file()
-    if external is not None:
-        data["progress"] = external
+        norm = normalize_loaded_data(repair_json_file(OUTPUT_FILE))
+        progress = load_progress_file() or norm.get("progress", {"brand_index": 0})
+        data = {
+            "_store": CacheDataset(devices_list_to_map(norm["devices"])),
+            "progress": progress,
+        }
         migrate_progress(data)
 
-    before = len(data["devices"])
+    store = get_store(data)
+    before = len(store)
     valid = []
     removed = 0
-    for device in data["devices"]:
+    for device in store.as_list():
         if not is_valid_device_entry(device):
             removed += 1
             continue
         valid.append(normalize_device_record(device))
 
-    data["devices"] = dedupe_devices(valid)
+    data["_store"] = CacheDataset({})
+    for entry in dedupe_devices(valid):
+        data["_store"].add_entry(entry)
     save_data(data)
 
     print(f"Fixed {OUTPUT_FILE}:")
     print(f"  Removed invalid/empty entries: {removed}")
-    print(f"  Device entries: {before} → {len(data['devices'])}")
+    print(f"  Device entries: {before} → {len(data['_store'])}")
     print(f"  Resume brand index: {get_progress(data)}")
     print(f"  Listed phones: {data['progress'].get('listed_phones', {})}")
 
@@ -1766,7 +1854,7 @@ def clean_output():
 def repair_progress():
     """Rebuild listed_phones / complete_phones from GSM + cache file (fixes truncated progress.json)."""
     data = load_data()
-    devices = data["devices"]
+    store = get_store(data)
     brands = get_brands()
     if not brands:
         print("❌ Could not fetch GSM Arena brand list.")
@@ -1778,14 +1866,12 @@ def repair_progress():
     brand_by = {b["brand"]: b for b in brands}
     progress = data["progress"]
     listed = progress.setdefault("listed_phones", {})
-    vendors = sorted(
-        {(d.get("hardware_vendor") or "").lower() for d in devices if d.get("hardware_vendor")}
-    )
+    vendors = sorted(store.phones_by_vendor.keys())
 
     print(f"Vendors in cache: {len(vendors)}")
     for i, v in enumerate(vendors, start=1):
         if v not in brand_by:
-            n = len(unique_phones_in_data(devices, v))
+            n = len(store.phones_for_vendor(v))
             listed.setdefault(v, n)
             print(f"[{i}/{len(vendors)}] {v}: no GSM makers entry — listed_phones={listed[v]} (from dataset)")
             continue
@@ -1802,7 +1888,7 @@ def repair_progress():
             listed[v] = max(listed.get(v, 0), nlist)
             print(f"   → listed_phones[{v}] = {listed[v]}")
         else:
-            n = len(unique_phones_in_data(devices, v))
+            n = len(store.phones_for_vendor(v))
             listed[v] = max(listed.get(v, 0), n)
             print(f"   ⚠ GSM parse empty — listed_phones[{v}] = {listed[v]} (dataset floor)")
 
@@ -1812,9 +1898,9 @@ def repair_progress():
 
     complete = progress.setdefault("complete_phones", {})
     for v in sorted(set(listed) | set(complete.keys()) | set(vendors)):
-        complete[v] = len(unique_phones_in_data(devices, v))
+        complete[v] = len(store.phones_for_vendor(v))
 
-    idx = get_effective_start_index(brands, devices, data, quiet=True)
+    idx = get_effective_start_index(brands, data, quiet=True, devices_or_store=store)
     set_progress(data, idx)
     save_data(data)
     print(f"Done. Wrote {PROGRESS_FILE}; brand_index={idx}; listed_phones keys={len(listed)}")
